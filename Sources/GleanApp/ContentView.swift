@@ -16,16 +16,17 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 460)
-        } detail: {
-            detail
+        HSplitView {
+            groupPane
+                .frame(minWidth: 330, idealWidth: 440, maxWidth: 780)
+
+            detailPane
+                .frame(minWidth: 420, maxWidth: .infinity)
         }
         .navigationTitle(selectedGroup.map { "第 \($0.id + 1) 组" } ?? "glean")
         .navigationSubtitle(selectedGroup.map(subtitle) ?? "")
         .toolbar { toolbar }
-        .frame(minWidth: 900, minHeight: 560)
+        .frame(minWidth: 900, minHeight: 620)
         .overlay {
             if preview != nil {
                 PreviewOverlay(state: $preview)
@@ -33,38 +34,54 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 侧边栏
+    // MARK: - 左：组卡片网格
 
-    private var sidebar: some View {
-        List(selection: $selection) {
-            Section {
-                ForEach(runner.groups) { group in
-                    GroupRow(group: group)
-                        .tag(group.id)
-                }
-            } header: {
+    private var groupPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
                 Text(runner.groups.isEmpty ? "相似组" : "相似组 · \(runner.groups.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
-        }
-        .listStyle(.sidebar)
-        .overlay {
-            if runner.groups.isEmpty {
-                if runner.running {
-                    ProgressView("分析中…")
-                        .controlSize(.small)
-                } else {
-                    Text(assets.isEmpty ? "先扫描图库" : "还没有结果")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+
+            ScrollView {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 152, maximum: 240), spacing: 10)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(runner.groups) { group in
+                        GroupCard(group: group, isSelected: group.id == selection) {
+                            selection = group.id
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
+            .overlay {
+                if runner.groups.isEmpty {
+                    if runner.running {
+                        ProgressView("分析中…").controlSize(.small)
+                    } else {
+                        Text(assets.isEmpty ? "先扫描图库" : "还没有结果")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+        .background(.background)
     }
 
-    // MARK: - 详情
+    // MARK: - 右：选中组的照片
 
     @ViewBuilder
-    private var detail: some View {
+    private var detailPane: some View {
         if let group = selectedGroup {
             GroupDetailView(group: group) { index in
                 preview = PreviewState(group: group, index: index)
@@ -76,7 +93,7 @@ struct ContentView: View {
                 description: Text(
                     runner.groups.isEmpty
                         ? "点右上角「分析」开始查找"
-                        : "左侧每一行是一个相似组，点开看这一组里的照片"
+                        : "左侧每一张卡片是一个相似组，点开看这一组里的照片"
                 )
             )
         }
@@ -90,7 +107,6 @@ struct ContentView: View {
             if busy || runner.running {
                 ProgressView()
                     .controlSize(.small)
-                    .progressViewStyle(.circular)
             }
         }
 
@@ -160,62 +176,95 @@ struct ContentView: View {
     }
 }
 
-// MARK: - 侧边栏行
+// MARK: - 组卡片
 
-struct GroupRow: View {
+struct GroupCard: View {
     let group: AnalyzedGroup
+    let isSelected: Bool
+    let action: () -> Void
 
-    @State private var thumbnail: CGImage?
+    @State private var thumbnails: [String: CGImage] = [:]
+
+    private var stripIDs: [String] {
+        Array(group.assets.prefix(3).map(\.id))
+    }
 
     private var countLine: String {
-        String(format: "%d 张 · 凝聚度 %.3f", group.assets.count, group.cohesion)
+        String(format: "%d 张 · %.3f", group.assets.count, group.cohesion)
     }
 
     private var detailLine: String {
-        var parts = [
-            group.kind == .photo ? "照片" : "截图",
-            "跨度 " + Theme.duration(group.timeSpan),
-        ]
+        var parts = ["跨度 " + Theme.duration(group.timeSpan)]
         if !group.links.isEmpty {
             parts.append(Theme.links(group.links))
+        }
+        if group.kind == .screenshot {
+            parts.append("截图")
         }
         return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.quaternary)
-                if let thumbnail {
-                    Image(decorative: thumbnail, scale: 1)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                thumbStrip
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("第 \(group.id + 1) 组")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+
+                    Text(countLine)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+
+                    Text(detailLine)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
-            .frame(width: Theme.sidebarThumb, height: Theme.sidebarThumb)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("第 \(group.id + 1) 组")
-                    .font(.system(size: 12, weight: .medium))
-                Text(countLine)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                Text(detailLine)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            .padding(7)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.07), lineWidth: isSelected ? 2 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .help("第 \(group.id + 1) 组 · \(group.assets.count) 张 · 凝聚度 \(String(format: "%.3f", group.cohesion))")
+        .task(id: stripIDs.joined(separator: ",")) {
+            var loaded: [String: CGImage] = [:]
+            for id in stripIDs {
+                if let image = await ThumbnailCache.shared.image(for: id, target: 220) {
+                    loaded[id] = image
+                }
             }
+            thumbnails = loaded
+        }
+    }
 
-            Spacer(minLength: 0)
+    private var thumbStrip: some View {
+        HStack(spacing: 2) {
+            ForEach(stripIDs, id: \.self) { id in
+                Color.clear
+                    .overlay {
+                        if let image = thumbnails[id] {
+                            Image(decorative: image, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
         }
-        .padding(.vertical, 3)
-        .task(id: group.assets.first?.id) {
-            guard let id = group.assets.first?.id else { return }
-            thumbnail = await ThumbnailCache.shared.image(for: id, target: 128)
-        }
+        .frame(height: 82)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 }
