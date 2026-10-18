@@ -152,7 +152,11 @@ struct ContentView: View {
                     spacing: 10
                 ) {
                     ForEach(runner.groups) { group in
-                        GroupCard(group: group, isSelected: group.id == selection) {
+                        GroupCard(
+                            group: group,
+                            isSelected: group.id == selection,
+                            markedCount: group.assets.reduce(0) { $0 + (marks.marked.contains($1.id) ? 1 : 0) }
+                        ) {
                             selection = group.id
                             selectedIDs = []
                             focusedID = nil
@@ -474,6 +478,8 @@ struct ContentView: View {
 struct GroupCard: View {
     let group: AnalyzedGroup
     let isSelected: Bool
+    /// 本组里已标记待删除的张数。为 0 时不显示任何标记。
+    let markedCount: Int
     let action: () -> Void
 
     @State private var thumbnails: [String: CGImage] = [:]
@@ -503,9 +509,17 @@ struct GroupCard: View {
             thumbStrip
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("第 \(group.id + 1) 组")
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 4) {
+                    Text("第 \(group.id + 1) 组")
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(.primary)
+
+                    Spacer(minLength: 2)
+
+                    if markedCount > 0 {
+                        markedBadge
+                    }
+                }
 
                 Text(countLine)
                     .font(.system(size: 10))
@@ -527,7 +541,8 @@ struct GroupCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { action() }
-        .help("第 \(group.id + 1) 组 · \(group.assets.count) 张 · 凝聚度 \(String(format: "%.3f", group.cohesion)) · 跨度 \(Theme.duration(group.timeSpan))")
+        .help("第 \(group.id + 1) 组 · \(group.assets.count) 张 · 凝聚度 \(String(format: "%.3f", group.cohesion)) · 跨度 \(Theme.duration(group.timeSpan))"
+              + (markedCount > 0 ? " · 已标记待删 \(markedCount) 张" : ""))
         .task(id: stripIDs.joined(separator: ",")) {
             var loaded: [String: CGImage] = [:]
             for id in stripIDs {
@@ -537,6 +552,21 @@ struct GroupCard: View {
             }
             thumbnails = loaded
         }
+    }
+
+    /// 已标过待删的组在列表里要能一眼看出来：标记是存在 Photos 里的，
+    /// 重开 App 也会保留，所以列表必须能反映“这组处理过没有”。
+    private var markedBadge: some View {
+        let all = markedCount == group.assets.count
+        return Text(all ? "整组待删" : "待删 \(markedCount)")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(all ? Color.white : Color.red)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(
+                all ? Color.red.opacity(0.85) : Color.red.opacity(0.15),
+                in: Capsule()
+            )
     }
 
     private var thumbStrip: some View {
