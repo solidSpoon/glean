@@ -4,6 +4,10 @@ import SwiftUI
 
 @main
 struct GleanApp: App {
+    init() {
+        LaunchEnvironment.warnIfUnbundled()
+    }
+
     var body: some Scene {
         WindowGroup("glean") {
             ContentView()

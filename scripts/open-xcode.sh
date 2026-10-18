@@ -12,3 +12,9 @@ fi
 cd "$ROOT"
 xcodegen generate
 open "$ROOT/glean.xcodeproj"
+
+cat <<'TIP'
+
+提示：Xcode 里工具栏的 scheme 要选 Glean（App），不要选 GleanApp。
+      GleanApp 是 SwiftPM 的裸可执行文件，跑起来没有窗口、也读不到相册。
+TIP
