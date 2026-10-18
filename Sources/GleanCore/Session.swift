@@ -25,11 +25,15 @@ public struct PhotoSession: Sendable {
 public enum SessionBuilder {
     /// 相邻两张间隔超过 `maxGap` 就切开会话。
     ///
-    /// 默认 90 秒：连拍间隔 0.5–2 秒，手动连按几秒，停下来想一想再拍通常也不会超过
-    /// 一分半。调大 → 会话变长、候选集变大、误合并风险上升；调小 → 同一场景被切碎。
+    /// 默认 300 秒（5 分钟）。原本是 90 秒，但那个值把阈值表的后两档（0.78 / 0.85）
+    /// 变成了死配置——会话在 90 秒就断了，根本走不到长间隔的阈值。改成 300 秒后
+    /// 0.78 那一档真正生效，且能拉回“走两步换个角度再拍”这类（隔几分钟重拍同一物）。
+    ///
+    /// 再往上调（比如两小时，让 0.85 也生效）风险大于收益：会话会膨胀成几百上千张，
+    /// 同一房间里的不同东西都可能被 0.78–0.85 拉进一组。
     public static func build(
         from assets: [GleanAsset],
-        maxGap: TimeInterval = 90
+        maxGap: TimeInterval = 300
     ) -> [PhotoSession] {
         let dated = assets
             .compactMap { asset -> (GleanAsset, Date)? in

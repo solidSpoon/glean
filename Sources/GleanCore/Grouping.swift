@@ -45,6 +45,9 @@ public struct ThresholdPolicy: Sendable {
     /// 一眼就能看出来，漏掉的那张永远不会自己冒出来。
     ///
     /// 真实照片上的最优值必须用 audit 曲线校准，别直接搬这几个数字上线。
+    /// 注意：最后一档（0.85 @ 2 小时）只有把会话切分阈值调到 300 秒以上才会生效。
+    /// 当前 `SessionBuilder` 默认 300 秒，所以实际能走到的是前三档，超过 5 分钟的
+    /// 直接交给跨会话合并（0.88）。留着这档是给“想放开到几小时一场”的实验用的。
     public static let `default` = ThresholdPolicy(
         steps: [
             Step(maxGap: 2, minSimilarity: 0.65),       // 连拍，几乎是同一张
@@ -118,7 +121,7 @@ public enum Grouping {
         prints: [String: [Float]],
         policy: ThresholdPolicy = .default,
         screenshotPolicy: ThresholdPolicy = .screenshot,
-        maxGap: TimeInterval = 90
+        maxGap: TimeInterval = 300
     ) -> [Group] {
         var vectors: [String: [Float]] = [:]
         vectors.reserveCapacity(prints.count)
