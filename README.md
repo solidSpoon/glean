@@ -52,20 +52,22 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 | 缩略图 | `PHImageManager.requestImage` 512pt | 单张 ~10ms，`isNetworkAccessAllowed = false` 只读本地副本 |
 | 相似度 | **Vision `VNGenerateImageFeaturePrintRequest`** | 768 维，跑在 ANE 上，零依赖；对重压缩/裁剪/调色/重拍的鲁棒性远好于 pHash |
 | 分组 | 归一化向量 + 点积 + 并查集 | 连通分量天然出组，无需 K-Means 调参；个人库规模 O(n²) 够用 |
-| 选优（待做） | `CalculateImageAestheticsScoresRequest` + 拉普拉斯方差 + 分辨率 | 组内自动推荐"留这张" |
 | 缓存（待做） | SQLite + Float32 BLOB | 增量扫描靠 `localIdentifier + modificationDate` |
 
 **为什么不用 Python / Electron / Tauri**：为一个自用工具背 Python + torch（2GB）或 Electron 运行时（200MB）都不值；而 macOS 上最好的图像相似度模型本来就已经在系统里了。
 
 ## 怎么用
 
-**最短路径：双击 `build/Graze.app`。** 不需要装任何东西，也不用开 Xcode。
+**先用起来**：自己编译（默认路径）：`./scripts/run.sh`，产物在 `build/Graze.app`；
+或者等 [Releases](https://github.com/solidSpoon/graze/releases) 里有构建好的 zip 后直接下载
+（注意「下载 release 的人要知道」里的 arm64 和未公证两条）。`build/` 不入库，
+所以刚克隆下来没有现成 app。
 
 打开后：
 
 1. **请求相册访问权限** → 系统弹窗里选「允许」（也可以选「仅选中」先小范围试）
-2. 工具栏选**分析范围**（最近 1/3/6 个月、1 年、全部，括号里是该范围的片数）
-3. 点**扫描图库** → 底部状态栏显示「读取相册 1200/7624」
+2. 点**扫描图库** → 读整库一次，底部状态栏显示「读取相册 1200/7624」
+3. 工具栏选**分析范围**（最近 1/3/6 个月、1 年、全部，括号里是该范围的片数）。换范围不用重扫
 4. 点**分析** → 底部状态栏显示阶段和进度条，左侧出现相似组卡片
 
 界面是顶部共用一条系统工具栏，下面三栏：
@@ -90,8 +92,6 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 所以一次完整分析的成本就是特征 + 分组：全库 7624 张约 **41 秒**（特征 39 秒 + 分组 2 秒）。
 
 **现在还不会删任何东西**——只负责找组和标记。
-
-> ⚠️ 别在 Xcode 里选 `GrazeApp` scheme 运行，也别 `swift run`。那是没有 bundle 的裸可执行文件：窗口建不出来、相册也读不到。真跑了它会直接提示你怎么做。
 
 ## 管线
 
@@ -129,8 +129,9 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 所以会话内阈值宁可偏低：分了不该分的组，用户扫一眼就能看出来；漏掉的那张永远不会
 自己冒出来。
 
-（合成图测不了"不同场景能否分开"——几张合成图在语义上是同一类东西，FeaturePrint 给出
-的 0.957 和"同背景主体移位"的 0.967 几乎一样。这一项只能靠真实图库的 audit。）
+（这组数字全部来自合成图。合成图测不了"不同场景能否分开"：语义上同类的东西，FeaturePrint
+给的 0.957 和"同背景主体移位"的 0.967 几乎一样。这一项只能靠真实图库审计，所以现在的
+阈值是按"宁可多分组"定的，还没过精度曲线。）
 
 ## 三个必须知道的坑
 
@@ -181,12 +182,14 @@ license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Comman
 ```
 Sources/GrazeCore/       纯逻辑，不依赖 UI
   Models.swift           GrazeAsset
-  PhotoLibrary.swift     授权、资产枚举、缩略图
+  PhotoLibrary.swift     授权、资产枚举、缩略图（512pt，不读 iCloud）
+  ThumbnailCache.swift   缩略图内存缓存
   FeaturePrintService.swift  Vision 特征提取
   Session.swift          时间切片
   Grouping.swift         阈值策略 + 两阶段聚类 + 成员剪枝
   DeletionAlbum.swift    「待删除」相册 = 标记的唯一事实来源
   Clustering.swift       并查集 + 余弦
+  GrazeLog.swift         ~/Library/Logs/graze/graze.jsonl，一行一个 JSON
 Sources/GrazeApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
 Resources/Info.plist     bundle 元数据（含相册用途说明）
 project.yml              Xcode 工程描述（xcodegen 输入）
@@ -244,10 +247,10 @@ macos-26 上打包 → 校验版本号与 tag 一致 → graze-v0.2.0-arm64.zip 
 
 ## 路线
 
-- **M1 质量**：全量扫描 → 特征 → 分组 → 导出 JSON，用真实图库调阈值（**当前在这里**：管线已跑通，阈值待审计）
-- **M1.5 审计**：按相似度分档抽样，人工标注"该合/不该合"，画出精度曲线后再定阈值
+- **M1 质量**（已完成）：全量扫描 → 特征 → 分组，管线跑通
+- **M1.5 审计**（**当前在这里**）：按相似度分档抽样，人工标注"该合/不该合"，画出精度曲线后再定阈值。现在的阈值是按经验定的
 - **M2 可用**（已完成）：SwiftUI 三栏，键盘 `←→` 翻照片、`space` 预览、`回车` 标记待删除
-- **M3 安全**：删除走 `PHAssetChangeRequest.deleteAssets`（进"最近删除"，30 天内可恢复）+ 本地 manifest 记录每批操作，支持整批撤销
+- **M3 安全**（未做）：删除走 `PHAssetChangeRequest.deleteAssets`（进"最近删除"，30 天内可恢复）+ 本地 manifest 记录每批操作，支持整批撤销。**这就是"现在还不会删任何东西"的原因**
 - **M4 增量**：SQLite 缓存特征，只算新图；百万级再换 IVF
 
 ## 删除策略
