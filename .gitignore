@@ -3,5 +3,9 @@ build/
 .swiftpm/
 DerivedData/
 *.xcuserstate
+xcuserdata/
+# glean.xcodeproj 由 project.yml 生成（xcodegen generate），不入库
+*.xcodeproj/
+*.xcworkspace/
 .DS_Store
 artifacts/

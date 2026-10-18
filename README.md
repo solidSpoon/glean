@@ -78,10 +78,35 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 ## 开发
 
 ```bash
-./scripts/run.sh              # 编译 + 打包 + 启动
-swift test                    # 22 个测试：会话切片 / 时间阈值 / 链式合并 / 选优 / Vision 冒烟
-GLEAN_SIGN_ID="glean-dev" ./scripts/run.sh   # 签名身份稳定的版本
+./scripts/run.sh              # 命令行路径：编译 + 打包 + 启动
+swift test                    # 22 个测试
+./scripts/open-xcode.sh       # Xcode 路径：生成工程并打开
 ```
+
+### 两条构建路径，一个产物
+
+| | 命令行 | Xcode |
+|---|---|---|
+| 构建 | `Package.swift` + `scripts/build-app.sh` | `project.yml` → `xcodegen` |
+| 产物 | `build/Glean.app` | `build/Glean.app`（同一个路径） |
+| 运行 | `./scripts/run.sh` | ⌘R |
+| 测试 | `swift test` | ⌘U |
+
+两条路径都可用，产物落在同一个位置，不会出现同 bundle id 两份 app 让 LaunchServices
+和相册授权搞不清该认哪一个。谁最后构建就是谁。
+
+**Xcode 工程是产物，不是事实来源。** `glean.xcodeproj` 由 `project.yml` 生成且不入库——
+pbxproj 是机器生成的 XML，冲突难解、人读不了。在 Xcode 图形界面里改 Build Settings
+只会改到 `.xcodeproj`，下次 `xcodegen generate` 会被覆盖；要持久化的设置请写进 `project.yml`。
+
+改动 `project.yml` 或增删文件后记得重跑 `./scripts/open-xcode.sh`（只是重新生成，不丢东西）。
+
+### 签名
+
+默认是临时签名（`CODE_SIGN_IDENTITY: "-"`，等价于 Xcode 里的
+"Sign to Run Locally"），不需要开发者账号就能构建。但临时签名每次编译 cdhash 都变，
+相册授权会反复失效弹窗。想固定身份：把 `project.yml` 里的 `CODE_SIGN_IDENTITY` 换成你
+自签名证书的通用名（如 `glean-dev`），命令行和 Xcode 就都稳定了。
 
 如果 Xcode 升级后许可证未接受，`swift build` 会报 *"You have not agreed to the Xcode
 license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Command Line Tools 的
@@ -100,6 +125,7 @@ Sources/GleanCore/       纯逻辑，不依赖 UI
   Clustering.swift       并查集 + 余弦
 Sources/GleanApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
 Resources/Info.plist     bundle 元数据（含相册用途说明）
+project.yml              Xcode 工程描述（xcodegen 输入）
 scripts/                 打包与启动
 ```
 

@@ -1,0 +1,87 @@
+# Xcode 工程描述。`xcodegen generate` 会据此生成 glean.xcodeproj。
+#
+# 为什么用 XcodeGen 而不是手写 .xcodeproj：pbxproj 是机器生成的 XML，冲突难解、
+# 人读不了、agent 改起来容易出错。project.yml 是唯一事实来源，工程文件是产物。
+#
+# 注意：在 Xcode 图形界面里改 Build Settings 只改动 .xcodeproj，下次
+# `xcodegen generate` 会被覆盖。要持久化的设置请写在这里。
+name: glean
+
+options:
+  bundleIdPrefix: com.spoon
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # 自用：不签名团队、临时签名，CI/命令行都能直接构建。
+    # Xcode 里等价于 Signing & Capabilities → "Sign to Run Locally"。
+    # 想固定签名身份（避免重编译后相册授权失效），把 CODE_SIGN_IDENTITY 换成
+    # 你自签名证书的通用名，例如 "glean-dev"。
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+    # 让 Xcode 产物落在和 scripts/build-app.sh 完全相同的位置：只有一个 build/Glean.app，
+    # 不会出现同 bundle id 两份 app 让 LaunchServices 和相册授权搞不清该认哪一个。
+    # 必须放 project 级——只给 App target 设会让依赖的 GleanCore 落到别处，模块解析失败。
+    CONFIGURATION_BUILD_DIR: "$(PROJECT_DIR)/build"
+
+targets:
+  # 纯逻辑层。做成静态库，这样 App target import GleanCore 不需要额外嵌入框架。
+  GleanCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/GleanCore
+    settings:
+      base:
+        PRODUCT_NAME: GleanCore
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+
+  # 真正的 macOS App target。这就是 `scripts/build-app.sh` 手工拼出来的那个 bundle，
+  # 但由 Xcode 负责生成、签名、调试。
+  Glean:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/GleanApp
+    dependencies:
+      - target: GleanCore
+    settings:
+      base:
+        # 必须是 Glean：Info.plist 里 CFBundleExecutable 是 Glean，
+        # 两者不一致会导致 bundle 起不来。
+        PRODUCT_NAME: Glean
+        PRODUCT_BUNDLE_IDENTIFIER: com.spoon.glean
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+    scheme:
+      gatherCoverageData: false
+      testTargets:
+        - GleanCoreTests
+
+  GleanCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/GleanCoreTests
+    dependencies:
+      - target: GleanCore
+    settings:
+      base:
+        PRODUCT_NAME: GleanCoreTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.spoon.glean.tests
+        GENERATE_INFOPLIST_FILE: YES
