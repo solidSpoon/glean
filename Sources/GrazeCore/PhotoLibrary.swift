@@ -90,10 +90,15 @@ public enum Thumbnailer {
                 contentMode: .aspectFit,
                 options: options
             ) { image, info in
-                // 可能回调多次：先给降质图再给清晰图。只认最后一次。
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if isDegraded { return }
-                if box.claim() { continuation.resume(returning: image) }
+                // PhotoKit 可能回调多次（先给降质图、再给清晰图），也可能报错或取消。
+                // 降质图一律丢掉；错误/取消必须立即 resume，否则 continuation 永远
+                // 不会兑现，调用方的 task 就挂死了。
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                let failed = (info?[PHImageErrorKey] as? Error) != nil
+                let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                guard failed || cancelled || !degraded else { return }
+                guard box.claim() else { return }
+                continuation.resume(returning: failed || cancelled ? nil : image)
             }
         }
 

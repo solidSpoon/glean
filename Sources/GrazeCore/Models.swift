@@ -63,14 +63,3 @@ public struct GrazeAsset: Sendable, Identifiable, Hashable {
 
     public var pixelCount: Int { pixelWidth * pixelHeight }
 }
-
-/// 一张图的特征向量。归一化后存，余弦相似度就退化成点积。
-public struct FeaturePrint: Sendable {
-    public let assetID: String
-    public let values: [Float]
-
-    public init(assetID: String, values: [Float]) {
-        self.assetID = assetID
-        self.values = values
-    }
-}

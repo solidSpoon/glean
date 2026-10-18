@@ -32,17 +32,6 @@ public struct UnionFind {
         parent[rb] = ra
         size[ra] += size[rb]
     }
-
-    /// 返回所有大小 >= 2 的连通分量，每组成员的原始下标。
-    public mutating func groups(minimumSize: Int = 2) -> [[Int]] {
-        var buckets: [Int: [Int]] = [:]
-        for i in 0..<parent.count {
-            buckets[find(i), default: []].append(i)
-        }
-        return buckets.values
-            .filter { $0.count >= minimumSize }
-            .sorted { $0.count > $1.count }
-    }
 }
 
 public enum Similarity {
@@ -59,33 +48,13 @@ public enum Similarity {
     }
 
     /// 两个已归一化向量的余弦相似度（即点积）。
+    ///
+    /// 不用 `cosine` 配合未归一化的向量：这个函数假定入参已经是单位向量，
+    /// 否则结果不是余弦而是内积，数值会悄悄超出 [−1, 1]。
     public static func cosine(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }
         var dot: Float = 0
         vDSP_dotpr(a, 1, b, 1, &dot, vDSP_Length(a.count))
         return dot
-    }
-
-    /// 全量两两比较 + 连通分量分组。
-    ///
-    /// 个人图库（十万张以内）这个 O(n²) 暴力解法完全够用：十万张约 50 亿次
-    /// Float 点积，Accelerate 下是几分钟级别，而且只需要在增量时算新图对旧图。
-    /// 真到百万级再换 IVF / HNSW。
-    public static func cluster(
-        _ prints: [FeaturePrint],
-        threshold: Float,
-        minimumGroupSize: Int = 2
-    ) -> [[Int]] {
-        let vectors = prints.map { normalized($0.values) }
-        var uf = UnionFind(count: vectors.count)
-
-        for i in 0..<vectors.count {
-            for j in (i + 1)..<vectors.count {
-                if cosine(vectors[i], vectors[j]) >= threshold {
-                    uf.union(i, j)
-                }
-            }
-        }
-        return uf.groups(minimumSize: minimumGroupSize)
     }
 }

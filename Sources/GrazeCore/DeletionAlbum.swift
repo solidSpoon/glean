@@ -54,7 +54,11 @@ public enum DeletionAlbum {
 
     public static func setMarked(_ identifiers: [String], marked: Bool) async throws {
         guard !identifiers.isEmpty else { return }
-        guard let album = try await findOrCreate() else { return }
+        // 建不出相册就必须抛错：静默 return 会让用户以为标上了，
+        // 实际上 Photos 里什么都没有。
+        guard let album = try await findOrCreate() else {
+            throw MarkError.albumUnavailable
+        }
 
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
         try await PHPhotoLibrary.shared().performChanges {
@@ -63,6 +67,17 @@ public enum DeletionAlbum {
                 request.addAssets(assets)
             } else {
                 request.removeAssets(assets)
+            }
+        }
+    }
+
+    public enum MarkError: LocalizedError {
+        case albumUnavailable
+
+        public var errorDescription: String? {
+            switch self {
+            case .albumUnavailable:
+                return "建不出「\(DeletionAlbum.title)」相册，标记没有生效"
             }
         }
     }

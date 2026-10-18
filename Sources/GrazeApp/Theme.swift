@@ -3,7 +3,6 @@ import SwiftUI
 
 enum Theme {
     static let cellSide: CGFloat = 168
-    static let sidebarThumb: CGFloat = 52
 
     private static let shortDateFormatter: DateFormatter = {
         let formatter = DateFormatter()

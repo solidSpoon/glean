@@ -18,10 +18,10 @@ final class AnalysisRunner: ObservableObject {
 
     @Published private(set) var groups: [AnalyzedGroup] = []
 
+    /// 本次运行的阶段小结，按发生顺序。状态栏只显示最后一条，
+    /// 完整内容在日志文件里。
     @Published private(set) var summary: [String] = []
-    @Published private(set) var logLines: [String] = []
 
-    let logPath = GrazeLog.shared.textURL.path
     private let log = GrazeLog.shared
 
     private var prints: [String: [Float]] = [:]
@@ -49,8 +49,9 @@ final class AnalysisRunner: ObservableObject {
         let loaded = await Task.detached(priority: .userInitiated) { [self] in
             LibraryScanner.loadAssets { done, total in
                 Task { @MainActor in
-                    scanDone = done
-                    scanTotal = total
+                    // 进度回调来自后台线程，必须回主线程改 @Published
+                    self.scanDone = done
+                    self.scanTotal = total
                 }
             }
         }.value
@@ -78,7 +79,6 @@ final class AnalysisRunner: ObservableObject {
 
         groups = []
         summary = []
-        logLines = []
 
         let startedAt = Date()
         let bursts = assets.filter { $0.burstID != nil }.count
@@ -114,11 +114,21 @@ final class AnalysisRunner: ObservableObject {
 
         byID = Dictionary(uniqueKeysWithValues: analyzed.map { ($0.id, $0) })
 
-        let sessions = SessionBuilder.build(from: analyzed)
-        let sizes = sessions.map(\.count).sorted()
-        let median = sizes.isEmpty ? 0 : sizes[sizes.count / 2]
-        note("会话：\(sessions.count) 个（中位 \(median) 张，最大 \(sizes.last ?? 0) 张）")
-        log.info("sessions", ["count": sessions.count, "median": median, "max": sizes.last ?? 0])
+        // 聚类时照片和截图是分开切会话的，所以这里也要分开统计，
+        // 否则报出来的「中位/最大」跟真正参与比较的会话对不上。
+        let photoSessions = SessionBuilder.build(from: analyzed.filter { !$0.isScreenshot })
+        let shotSessions = SessionBuilder.build(from: analyzed.filter(\.isScreenshot))
+        for (label, sessions) in [("照片", photoSessions), ("截图", shotSessions)] {
+            let sizes = sessions.map(\.count).sorted()
+            let median = sizes.isEmpty ? 0 : sizes[sizes.count / 2]
+            note("会话（\(label)）：\(sessions.count) 个（中位 \(median) 张，最大 \(sizes.last ?? 0) 张）")
+            log.info("sessions", [
+                "kind": label,
+                "count": sessions.count,
+                "median": median,
+                "max": sizes.last ?? 0,
+            ])
+        }
 
         phase = "分组"
         progressValue = 0.97
@@ -260,7 +270,6 @@ final class AnalysisRunner: ObservableObject {
 
     private func note(_ line: String) {
         summary.append(line)
-        logLines.append(line)
         log.info("note", ["text": line])
     }
 }

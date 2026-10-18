@@ -54,7 +54,7 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 |---|---|
 | 左 | 相似组卡片，两列。卡片顶部并排显示组内前 3 张缩略图 |
 | 中 | 选中那一组的照片。单击选中，⌘/Shift 点击多选，双击或空格看大图 |
-| 右 | 选中照片的详细信息（文件名、尺寸、时间、清晰度、组内相似度…） |
+| 右 | 选中照片的详细信息（文件名、尺寸、时间、组内相似度…） |
 
 键盘：中栏 `←→` 换照片、`空格` 开关大图、`回车` 标记/取消待删除；
 大图里 `←→` 翻看、`空格` 退出。左栏只用鼠标点击。
@@ -63,11 +63,13 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 不复制文件，状态存在系统里；之后在 Photos.app 里打开这个相册、全选 `⌘⌫` 就是原生删除，
 30 天内可从“最近删除”恢复。
 
-**评分是软加载的。** 分组算完立刻出列表，只有你点开某一组时才给那组算清晰度和人脸。
-实测全库 7624 张：特征 39 秒 + 分组 2 秒就能看到全部 984 组；如果一上来就全量评分要
-228 秒，其中 187 秒都花在评分上。
+**这个工具不替你挑。** 早期版本还有第三阶段「组内评分」（拉普拉斯清晰度 + 人脸质量，
+用来推荐保留哪张），全库要 187 秒。但哪张该留，人扫一眼比算法准得多，那一层已经整个
+拆掉了。现在只做一件事：**把可能重复的照片找成一堆，按组内最新时间倒序排好**。
 
-**现在还不会删任何东西**——只把「哪几张是一组、该留哪张」算出来给你看。
+所以一次完整分析的成本就是特征 + 分组：全库 7624 张约 **41 秒**（特征 39 秒 + 分组 2 秒）。
+
+**现在还不会删任何东西**——只负责找组和标记。
 
 > ⚠️ 别在 Xcode 里选 `GrazeApp` scheme 运行，也别 `swift run`。那是没有 bundle 的裸可执行文件：窗口建不出来、相册也读不到。真跑了它会直接提示你怎么做。
 
@@ -82,7 +84,7 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
     ↓   改天重回同一地点也能连起来，但链不会跨会话蔓延
 成员下限剪枝：离代表图太远就摘出去（连拍成员豁免）
     ↓
-组内选优：清晰度（拉普拉斯）+ 人脸质量；只在组内相对比较，免校准
+组内按拍摄时间正序排列，整组按组内最新时间倒序
 ```
 
 会话切分阈值定在 **5 分钟**（原本是 90 秒）。90 秒把阈值表的后两档变成了死配置——
@@ -122,7 +124,7 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 
 ```bash
 ./scripts/run.sh              # 命令行路径：编译 + 打包 + 启动
-swift test                    # 22 个测试
+swift test                    # 19 个测试
 ./scripts/open-xcode.sh       # Xcode 路径：生成工程并打开
 ```
 
@@ -158,13 +160,12 @@ license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Comman
 
 ```
 Sources/GrazeCore/       纯逻辑，不依赖 UI
-  Models.swift           GrazeAsset / FeaturePrint
+  Models.swift           GrazeAsset
   PhotoLibrary.swift     授权、资产枚举、缩略图
   FeaturePrintService.swift  Vision 特征提取
   Session.swift          时间切片
   Grouping.swift         阈值策略 + 两阶段聚类 + 成员剪枝
-  ImageQuality.swift     清晰度 / 人脸质量
-  KeeperRanker.swift     组内选优
+  DeletionAlbum.swift    「待删除」相册 = 标记的唯一事实来源
   Clustering.swift       并查集 + 余弦
 Sources/GrazeApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
 Resources/Info.plist     bundle 元数据（含相册用途说明）
@@ -176,7 +177,7 @@ scripts/                 打包与启动
 
 - **M1 质量**：全量扫描 → 特征 → 分组 → 导出 JSON，用真实图库调阈值（**当前在这里**：管线已跑通，阈值待审计）
 - **M1.5 审计**：按相似度分档抽样，人工标注"该合/不该合"，画出精度曲线后再定阈值
-- **M2 可用**：SwiftUI 三栏（组列表 / 缩略图网格 / 对比），键盘 `←→` 翻组、`space` 预览、`1..9` 选保留
+- **M2 可用**（已完成）：SwiftUI 三栏，键盘 `←→` 翻照片、`space` 预览、`回车` 标记待删除
 - **M3 安全**：删除走 `PHAssetChangeRequest.deleteAssets`（进"最近删除"，30 天内可恢复）+ 本地 manifest 记录每批操作，支持整批撤销
 - **M4 增量**：SQLite 缓存特征，只算新图；百万级再换 IVF
 

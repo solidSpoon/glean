@@ -38,7 +38,6 @@ enum AnalysisRange: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @State private var status: PHAuthorizationStatus = PhotoAccess.current
     @State private var assets: [GrazeAsset] = []
-    @State private var busy = false
     @State private var range: AnalysisRange = .month3
     @State private var rangeCounts: [AnalysisRange: Int] = [:]
     @State private var selection: Int?
@@ -50,6 +49,10 @@ struct ContentView: View {
 
     /// 键盘导航只在中间一栏生效。左栏纯鼠标点击。
     @FocusState private var photoFocused: Bool
+
+    /// 用户在系统设置里改完权限回到 App 时，要重新读一次状态，否则界面还停在
+    /// “去系统设置授权”，只能重启才能继续。
+    @Environment(\.scenePhase) private var scenePhase
 
     /// 左栏固定两列。
     private let columnCount = 2
@@ -119,6 +122,11 @@ struct ContentView: View {
                         toggleMark(id)
                     }
                 )
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                status = PhotoAccess.current
             }
         }
         .onChange(of: preview == nil) { _, closed in
@@ -222,7 +230,7 @@ struct ContentView: View {
         .onKeyPress(.leftArrow) { movePhoto(-1) }
         .onKeyPress(.rightArrow) { movePhoto(1) }
         .onKeyPress(.space) { openFocusedPhoto() }
-        .onKeyPress(.return) { toggleSelectionMark() }
+        .onKeyPress(.return) { handleReturn() }
     }
 
     private func select(_ id: String, additive: Bool) {
@@ -308,12 +316,22 @@ struct ContentView: View {
                 Text("\(runner.phase) \(runner.progressLabel)")
                     .monospacedDigit()
             } else {
-                Text(runner.summary.first ?? idleText)
+                Text(runner.summary.last ?? idleText)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
 
             Spacer(minLength: 8)
+
+            // 标记失败必须让人看见：写相册失败时照片不会进「待删除」，
+            // 界面上却毫无变化，静默失败最难查。
+            if let error = marks.lastError {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Divider().frame(height: 12)
+            }
 
             if !marks.marked.isEmpty {
                 Text("待删除 \(marks.marked.count)")
@@ -370,7 +388,7 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .disabled(busy || runner.running || assets.isEmpty)
+                .disabled(runner.scanning || runner.running || assets.isEmpty)
                 .help("分析哪段时间的照片")
 
                 Button {
@@ -378,7 +396,7 @@ struct ContentView: View {
                 } label: {
                     Label("扫描图库", systemImage: "arrow.clockwise")
                 }
-                .disabled(busy || runner.running)
+                .disabled(runner.scanning || runner.running)
                 .help("读取相册资产列表")
 
                 Button {
@@ -386,7 +404,7 @@ struct ContentView: View {
                 } label: {
                     Label("分析", systemImage: "sparkles")
                 }
-                .disabled(busy || runner.running || assets.isEmpty)
+                .disabled(runner.scanning || runner.running || assets.isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("按所选范围查找相似组")
             } else {
@@ -419,10 +437,15 @@ struct ContentView: View {
     }
 
     /// 回车：选中项批量切换待删除标记（全已标记 → 取消，否则 → 标记）。
-    private func toggleSelectionMark() -> KeyPress.Result {
+    private func handleReturn() -> KeyPress.Result {
         guard !selectedIDs.isEmpty else { return .ignored }
-        markSelection(!allSelectedMarked)
+        toggleSelectionMark()
         return .handled
+    }
+
+    private func toggleSelectionMark() {
+        guard !selectedIDs.isEmpty else { return }
+        markSelection(!allSelectedMarked)
     }
 
     private func markSelection(_ value: Bool) {
@@ -435,8 +458,6 @@ struct ContentView: View {
     }
 
     private func scan() {
-        busy = true
-
         Task {
             let loaded = await runner.scanLibrary()
             await marks.refresh()
@@ -449,7 +470,6 @@ struct ContentView: View {
 
             assets = loaded
             rangeCounts = counts
-            busy = false
         }
     }
 

@@ -2,13 +2,19 @@ import XCTest
 @testable import GrazeCore
 
 final class ClusteringTests: XCTestCase {
-    func testUnionFindGroups() {
+    func testUnionFindMergesTransitively() {
         var uf = UnionFind(count: 5)
         uf.union(0, 1)
         uf.union(1, 2)
-        let groups = uf.groups()
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].sorted(), [0, 1, 2])
+
+        XCTAssertEqual(uf.find(0), uf.find(2), "0-1、1-2 相连，0 和 2 就该同根")
+        XCTAssertNotEqual(uf.find(0), uf.find(3))
+
+        var roots = Set<Int>()
+        for index in 0..<5 {
+            roots.insert(uf.find(index))
+        }
+        XCTAssertEqual(roots.count, 3, "应分成 {0,1,2} / {3} / {4}")
     }
 
     func testNormalizeProducesUnitVector() {
@@ -20,17 +26,5 @@ final class ClusteringTests: XCTestCase {
     func testCosineOfIdenticalIsOne() {
         let a = Similarity.normalized([1, 2, 3, 4])
         XCTAssertEqual(Similarity.cosine(a, a), 1.0, accuracy: 1e-5)
-    }
-
-    func testClusterSeparatesOrthogonalVectors() {
-        let prints = [
-            FeaturePrint(assetID: "a", values: [1, 0, 0]),
-            FeaturePrint(assetID: "b", values: [0.99, 0.01, 0]),
-            FeaturePrint(assetID: "c", values: [0, 1, 0]),
-            FeaturePrint(assetID: "d", values: [0, 0, 1]),
-        ]
-        let groups = Similarity.cluster(prints, threshold: 0.9)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].sorted(), [0, 1])
     }
 }

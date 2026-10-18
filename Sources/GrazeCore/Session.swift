@@ -23,17 +23,21 @@ public struct PhotoSession: Sendable {
 }
 
 public enum SessionBuilder {
-    /// 相邻两张间隔超过 `maxGap` 就切开会话。
+    /// 会话切分阈值：300 秒（5 分钟）。
     ///
-    /// 默认 300 秒（5 分钟）。原本是 90 秒，但那个值把阈值表的后两档（0.78 / 0.85）
-    /// 变成了死配置——会话在 90 秒就断了，根本走不到长间隔的阈值。改成 300 秒后
-    /// 0.78 那一档真正生效，且能拉回“走两步换个角度再拍”这类（隔几分钟重拍同一物）。
+    /// 原本是 90 秒，但那个值把 `ThresholdPolicy` 里长间隔的几档变成了死配置——
+    /// 会话在 90 秒就断了，根本走不到那几档。调到 300 秒后 `≤5min → 0.78` 才真正生效。
     ///
     /// 再往上调（比如两小时，让 0.85 也生效）风险大于收益：会话会膨胀成几百上千张，
     /// 同一房间里的不同东西都可能被 0.78–0.85 拉进一组。
+    ///
+    /// 只在这里定义一次，`Grouping.groups` 的默认值引用它，免得两处各写一个数。
+    public static let defaultMaxGap: TimeInterval = 300
+
+    /// 相邻两张间隔超过 `maxGap` 就切开会话。
     public static func build(
         from assets: [GrazeAsset],
-        maxGap: TimeInterval = 300
+        maxGap: TimeInterval = defaultMaxGap
     ) -> [PhotoSession] {
         let dated = assets
             .compactMap { asset -> (GrazeAsset, Date)? in
