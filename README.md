@@ -13,6 +13,7 @@
   <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
   <img alt="macOS 26" src="https://img.shields.io/badge/macOS-26-000000?logo=apple&logoColor=white">
   <img alt="零依赖" src="https://img.shields.io/badge/deps-none-2C3A2E">
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-B06A34">
 </p>
 
 ---
@@ -34,6 +35,9 @@
 图标字形来自 [game-icons.net](https://game-icons.net) 的 `skoll/goat`（CC BY 3.0），
 底板、配色由 `scripts/compose-goat.swift` 生成。README 顶部用的 `docs/icon.png`
 是从 `Resources/Graze.icns` 导出的 256px 版本（GitHub 不认 `.icns`）。
+
+代码是 MIT（见 [LICENSE](LICENSE)）；**图标不在 MIT 范围内**，字形部分依 CC BY 3.0，
+署名 game-icons.net。
 
 ## 技术栈
 
