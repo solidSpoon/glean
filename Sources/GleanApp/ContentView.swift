@@ -42,9 +42,11 @@ struct ContentView: View {
     @State private var range: AnalysisRange = .month3
     @State private var rangeCounts: [AnalysisRange: Int] = [:]
     @State private var selection: Int?
-    @State private var selectedAssetID: String?
+    @State private var selectedIDs: Set<String> = []
+    @State private var focusedID: String?
     @State private var preview: PreviewState?
     @StateObject private var runner = AnalysisRunner()
+    @StateObject private var marks = MarkStore()
 
     /// 键盘导航只在中间一栏生效。左栏纯鼠标点击。
     @FocusState private var photoFocused: Bool
@@ -57,9 +59,9 @@ struct ContentView: View {
         return runner.group(selection)
     }
 
-    private var selectedAsset: AnalyzedAsset? {
-        guard let selectedAssetID else { return nil }
-        return selectedGroup?.assets.first { $0.id == selectedAssetID }
+    private var focusedAsset: AnalyzedAsset? {
+        guard let focusedID else { return nil }
+        return selectedGroup?.assets.first { $0.id == focusedID }
     }
 
     var body: some View {
@@ -86,25 +88,38 @@ struct ContentView: View {
         .navigationTitle(selectedGroup.map { "第 \($0.id + 1) 组" } ?? "glean")
         .navigationSubtitle(selectedGroup.map(subtitle) ?? "")
         .toolbar { toolbar }
-        .frame(minWidth: 1040, minHeight: 600)
+        .frame(minWidth: 1060, minHeight: 600)
         .task(id: selection) {
             guard let id = selection else {
-                selectedAssetID = nil
+                selectedIDs = []
+                focusedID = nil
                 return
             }
             await runner.ensureScored(id)
             if let group = runner.group(id) {
-                if selectedAssetID == nil || group.assets.first(where: { $0.id == selectedAssetID }) == nil {
-                    selectedAssetID = group.assets.first?.id
+                let existing = group.assets.filter { selectedIDs.contains($0.id) }
+                if existing.isEmpty, let first = group.assets.first {
+                    selectedIDs = [first.id]
+                    focusedID = first.id
+                } else if focusedID == nil {
+                    focusedID = existing.first?.id
                 }
             }
             focusPhotoPane()
         }
         .overlay {
             if preview != nil {
-                PreviewOverlay(state: $preview) { id in
-                    selectedAssetID = id
-                }
+                PreviewOverlay(
+                    state: $preview,
+                    marked: marks.marked,
+                    onIndexChange: { id in
+                        focusedID = id
+                        selectedIDs = [id]
+                    },
+                    onToggleMark: { id in
+                        toggleMark(id)
+                    }
+                )
             }
         }
         .onChange(of: preview == nil) { _, closed in
@@ -139,7 +154,8 @@ struct ContentView: View {
                     ForEach(runner.groups) { group in
                         GroupCard(group: group, isSelected: group.id == selection) {
                             selection = group.id
-                            selectedAssetID = nil
+                            selectedIDs = []
+                            focusedID = nil
                             focusPhotoPane()
                         }
                     }
@@ -170,14 +186,19 @@ struct ContentView: View {
                 if group.isScored {
                     GroupDetailView(
                         group: group,
-                        selectedID: selectedAssetID,
-                        onSelect: { id in
-                            selectedAssetID = id
-                            photoFocused = true
+                        selectedIDs: selectedIDs,
+                        marked: marks.marked,
+                        onSelect: { id, additive in
+                            select(id, additive: additive)
                         },
                         onOpen: { index in
-                            selectedAssetID = group.assets[index].id
+                            let asset = group.assets[index]
+                            selectedIDs = [asset.id]
+                            focusedID = asset.id
                             preview = PreviewState(group: group, index: index)
+                        },
+                        onToggleMark: { id in
+                            toggleMark(id)
                         }
                     )
                 } else {
@@ -202,46 +223,68 @@ struct ContentView: View {
         .focusEffectDisabled()
         .onKeyPress(.leftArrow) { movePhoto(-1) }
         .onKeyPress(.rightArrow) { movePhoto(1) }
-        .onKeyPress(.space) { openSelectedPhoto() }
-        .onKeyPress(.return) { openSelectedPhoto() }
+        .onKeyPress(.space) { openFocusedPhoto() }
+        .onKeyPress(.return) { openFocusedPhoto() }
+    }
+
+    private func select(_ id: String, additive: Bool) {
+        if additive {
+            if selectedIDs.contains(id) {
+                selectedIDs.remove(id)
+            } else {
+                selectedIDs.insert(id)
+            }
+        } else {
+            selectedIDs = [id]
+        }
+        focusedID = id
+        photoFocused = true
+    }
+
+    private func movePhoto(_ delta: Int) -> KeyPress.Result {
+        guard let group = selectedGroup, group.isScored, !group.assets.isEmpty else { return .ignored }
+        guard let current = focusedID,
+              let index = group.assets.firstIndex(where: { $0.id == current }) else {
+            let first = group.assets.first
+            selectedIDs = first.map { [$0.id] } ?? []
+            focusedID = first?.id
+            return .handled
+        }
+        let next = index + delta
+        guard group.assets.indices.contains(next) else { return .handled }
+        let asset = group.assets[next]
+        focusedID = asset.id
+        selectedIDs = [asset.id]
+        return .handled
+    }
+
+    private func openFocusedPhoto() -> KeyPress.Result {
+        guard let group = selectedGroup, group.isScored, let id = focusedID,
+              let index = group.assets.firstIndex(where: { $0.id == id }) else { return .ignored }
+        preview = PreviewState(group: group, index: index)
+        return .handled
     }
 
     /// 把键盘焦点交给中间栏。
     ///
     /// 不能同步赋值：点击本身的焦点处理在这之后跑，会把刚设的值覆盖掉，
-    /// 表现就是“点一下没反应、要再点一次中间才生效”。放到下一轮 runloop 才稳。
+    /// 表现就是"点一下没反应、要再点一次中间才生效"。放到下一轮 runloop 才稳。
     private func focusPhotoPane() {
         DispatchQueue.main.async {
             photoFocused = true
         }
     }
 
-    private func movePhoto(_ delta: Int) -> KeyPress.Result {
-        guard let group = selectedGroup, group.isScored, !group.assets.isEmpty else { return .ignored }
-        guard let current = selectedAssetID,
-              let index = group.assets.firstIndex(where: { $0.id == current }) else {
-            selectedAssetID = group.assets.first?.id
-            return .handled
-        }
-        let next = index + delta
-        guard group.assets.indices.contains(next) else { return .handled }
-        selectedAssetID = group.assets[next].id
-        return .handled
-    }
-
-    private func openSelectedPhoto() -> KeyPress.Result {
-        guard let group = selectedGroup, group.isScored, let id = selectedAssetID,
-              let index = group.assets.firstIndex(where: { $0.id == id }) else { return .ignored }
-        preview = PreviewState(group: group, index: index)
-        return .handled
-    }
-
     // MARK: - 右：照片信息
 
     private var infoPane: some View {
         Group {
-            if let asset = selectedAsset, let group = selectedGroup {
-                AssetInfoView(asset: asset, group: group)
+            if let asset = focusedAsset, let group = selectedGroup {
+                AssetInfoView(
+                    asset: asset,
+                    group: group,
+                    isMarked: marks.marked.contains(asset.id)
+                )
             } else {
                 ContentUnavailableView(
                     "未选择照片",
@@ -274,6 +317,13 @@ struct ContentView: View {
 
             Spacer(minLength: 8)
 
+            if !marks.marked.isEmpty {
+                Text("待删除 \(marks.marked.count)")
+                    .foregroundStyle(.red)
+                    .monospacedDigit()
+                Divider().frame(height: 12)
+            }
+
             Text("资产 \(assets.count) · 相似组 \(runner.groups.count)")
                 .monospacedDigit()
         }
@@ -293,12 +343,38 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        if !selectedIDs.isEmpty {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    markSelection(true)
+                } label: {
+                    Label("标记待删除", systemImage: "trash")
+                }
+                .help("把选中的 \(selectedIDs.count) 张加进「\(DeletionAlbum.title)」相册")
+
+                if !selectedIDs.isDisjoint(with: marks.marked) {
+                    Button {
+                        markSelection(false)
+                    } label: {
+                        Label("取消标记", systemImage: "trash.slash")
+                    }
+                }
+            }
+        }
+
         ToolbarItemGroup(placement: .primaryAction) {
             if status == .notDetermined {
                 Button("请求相册权限") {
                     Task { status = await PhotoAccess.request() }
                 }
             } else if status == .authorized || status == .limited {
+                Button {
+                    openPhotos()
+                } label: {
+                    Label("在照片中查看", systemImage: "photo")
+                }
+                .help("打开照片 App，到「\(DeletionAlbum.title)」相册里全选删除")
+
                 Picker("范围", selection: $range) {
                     ForEach(AnalysisRange.allCases) { option in
                         Text("\(option.title)（\(rangeCounts[option] ?? 0)）")
@@ -350,11 +426,26 @@ struct ContentView: View {
 
     // MARK: - 动作
 
+    private func markSelection(_ value: Bool) {
+        let ids = Array(selectedIDs)
+        Task { await marks.setMarked(ids, value) }
+    }
+
+    private func toggleMark(_ id: String) {
+        Task { await marks.toggle(id) }
+    }
+
+    private func openPhotos() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Photos") else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
     private func scan() {
         busy = true
 
         Task {
             let loaded = await runner.scanLibrary()
+            await marks.refresh()
 
             let now = Date()
             var counts: [AnalysisRange: Int] = [:]
@@ -375,7 +466,8 @@ struct ContentView: View {
         Task {
             await runner.run(assets: scope)
             selection = runner.groups.first?.id
-            selectedAssetID = nil
+            selectedIDs = []
+            focusedID = nil
             photoFocused = true
         }
     }

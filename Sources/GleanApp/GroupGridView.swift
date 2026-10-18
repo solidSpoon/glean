@@ -1,12 +1,15 @@
+import AppKit
 import GleanCore
 import SwiftUI
 
-/// 中间一栏：选中那一组的照片。单击选中，双击预览。
+/// 中间一栏：选中那一组的照片。单击选中，⌘ 点击多选，双击预览。
 struct GroupDetailView: View {
     let group: AnalyzedGroup
-    let selectedID: String?
-    let onSelect: (String) -> Void
+    let selectedIDs: Set<String>
+    let marked: Set<String>
+    let onSelect: (String, Bool) -> Void
     let onOpen: (Int) -> Void
+    let onToggleMark: (String) -> Void
 
     var body: some View {
         ScrollView {
@@ -19,11 +22,14 @@ struct GroupDetailView: View {
                     AssetCell(
                         asset: asset,
                         isKeeper: offset == 0 && group.isScored,
-                        isSelected: asset.id == selectedID
-                    ) {
-                        onSelect(asset.id)
+                        isSelected: selectedIDs.contains(asset.id),
+                        isMarked: marked.contains(asset.id)
+                    ) { additive in
+                        onSelect(asset.id, additive)
                     } onOpen: {
                         onOpen(offset)
+                    } onToggleMark: {
+                        onToggleMark(asset.id)
                     }
                 }
             }
@@ -37,8 +43,10 @@ struct AssetCell: View {
     let asset: AnalyzedAsset
     let isKeeper: Bool
     let isSelected: Bool
-    let onSelect: () -> Void
+    let isMarked: Bool
+    let onSelect: (Bool) -> Void
     let onOpen: () -> Void
+    let onToggleMark: () -> Void
 
     @State private var image: CGImage?
 
@@ -78,6 +86,18 @@ struct AssetCell: View {
                         lineWidth: isSelected ? 3 : (isKeeper ? 2 : 0)
                     )
             )
+            .overlay(alignment: .bottomTrailing) {
+                if isMarked {
+                    Text("待删")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.85), in: Capsule())
+                        .padding(5)
+                }
+            }
+            .opacity(isMarked ? 0.72 : 1)
 
             Text(asset.name)
                 .font(.system(size: 11))
@@ -88,8 +108,20 @@ struct AssetCell: View {
         .frame(width: Theme.cellSide, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { onOpen() }
-        .onTapGesture { onSelect() }
-        .help("\(asset.name)\n双击或按空格看大图")
+        .onTapGesture {
+            // Shift / ⌘ 都当多选
+            let flags = NSEvent.modifierFlags
+            let additive = flags.contains(.command) || flags.contains(.shift)
+            onSelect(additive)
+        }
+        .contextMenu {
+            if isMarked {
+                Button("取消待删除标记") { onToggleMark() }
+            } else {
+                Button("标记为待删除") { onToggleMark() }
+            }
+        }
+        .help("\(asset.name)\n单击选中，⌘ 点击多选，双击看大图")
         .task(id: asset.id) {
             image = await ThumbnailCache.shared.image(for: asset.id, target: 320)
         }
@@ -101,6 +133,7 @@ struct AssetCell: View {
 struct AssetInfoView: View {
     let asset: AnalyzedAsset
     let group: AnalyzedGroup
+    let isMarked: Bool
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -121,6 +154,13 @@ struct AssetInfoView: View {
                     Text(asset.reason)
                         .font(.system(size: 11))
                         .foregroundStyle(asset.score >= 0.999 ? Color.accentColor : .secondary)
+                        .padding(.bottom, 6)
+                }
+
+                if isMarked {
+                    Text("已标记待删除")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.red)
                         .padding(.bottom, 6)
                 }
 
@@ -213,60 +253,48 @@ struct AssetInfoView: View {
     }
 }
 
-// MARK: - 全屏预览
+// MARK: - 全屏预览（底部带一行缩略图，方便连着标）
 
 struct PreviewOverlay: View {
     @Binding var state: PreviewState?
-    /// 预览里翻到别张时，同步给外面的选中项。
+    let marked: Set<String>
     var onIndexChange: ((String) -> Void)?
+    var onToggleMark: ((String) -> Void)?
 
     @State private var image: CGImage?
     @FocusState private var focused: Bool
 
     private var asset: AnalyzedAsset? { state?.asset }
+    private var isCurrentMarked: Bool {
+        guard let asset else { return false }
+        return marked.contains(asset.id)
+    }
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.9)
+            Color.black.opacity(0.92)
                 .ignoresSafeArea()
 
-            if let asset {
-                VStack(spacing: 12) {
+            if let state, let asset {
+                VStack(spacing: 10) {
+                    Spacer(minLength: 0)
+
                     if let image {
                         Image(decorative: image, scale: 1)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .padding(24)
+                            .padding(.horizontal, 24)
                     } else {
                         ProgressView()
                             .controlSize(.large)
                     }
 
-                    HStack(spacing: 14) {
-                        Button {
-                            _ = step(-1)
-                        } label: {
-                            Image(systemName: "chevron.left")
-                        }
-                        .disabled((state?.index ?? 0) <= 0)
+                    Spacer(minLength: 0)
 
-                        Text("\(asset.name)　\((state?.index ?? 0) + 1)/\(state?.group.assets.count ?? 0)")
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-
-                        Button {
-                            _ = step(1)
-                        } label: {
-                            Image(systemName: "chevron.right")
-                        }
-                        .disabled((state?.index ?? 0) >= (state?.group.assets.count ?? 1) - 1)
-
-                        Button("关闭") { state = nil }
-                            .keyboardShortcut(.cancelAction)
-                    }
-                    .controlSize(.large)
-                    .padding(.bottom, 20)
+                    controls(for: asset, state: state)
+                    strip(state: state)
                 }
+                .padding(.bottom, 14)
             }
         }
         .focusable()
@@ -280,12 +308,80 @@ struct PreviewOverlay: View {
         .onKeyPress(.leftArrow) { step(-1) }
         .onKeyPress(.rightArrow) { step(1) }
         .onKeyPress(.space) {
+            // 空格只负责开关预览（第一次打开、第二次退出），标记走按钮
             state = nil
             return .handled
         }
         .onKeyPress(.escape) {
             state = nil
             return .handled
+        }
+    }
+
+    private func controls(for asset: AnalyzedAsset, state: PreviewState) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                _ = step(-1)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .disabled(state.index <= 0)
+
+            Text("\(asset.name)　\(state.index + 1)/\(state.group.assets.count)")
+                .font(.system(size: 11))
+                .monospacedDigit()
+
+            Button {
+                _ = step(1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .disabled(state.index >= state.group.assets.count - 1)
+
+            Button {
+                onToggleMark?(asset.id)
+            } label: {
+                Label(
+                    isCurrentMarked ? "取消待删除" : "标记待删除",
+                    systemImage: isCurrentMarked ? "trash.slash" : "trash"
+                )
+            }
+            .tint(isCurrentMarked ? .red : nil)
+
+            Button("关闭") { self.state = nil }
+                .keyboardShortcut(.cancelAction)
+        }
+        .controlSize(.large)
+    }
+
+    private func strip(state: PreviewState) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(state.group.assets.enumerated()), id: \.element.id) { index, item in
+                        StripThumbnail(
+                            asset: item,
+                            isCurrent: index == state.index,
+                            isMarked: marked.contains(item.id)
+                        )
+                        .id(index)
+                        .onTapGesture {
+                            self.state = PreviewState(group: state.group, index: index)
+                            onIndexChange?(item.id)
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+            }
+            .frame(height: 62)
+            .onAppear {
+                proxy.scrollTo(state.index, anchor: .center)
+            }
+            .onChange(of: state.index) { _, newValue in
+                withAnimation(.smooth(duration: 0.18)) {
+                    proxy.scrollTo(newValue, anchor: .center)
+                }
+            }
         }
     }
 
@@ -298,6 +394,46 @@ struct PreviewOverlay: View {
             onIndexChange?(asset.id)
         }
         return .handled
+    }
+}
+
+private struct StripThumbnail: View {
+    let asset: AnalyzedAsset
+    let isCurrent: Bool
+    let isMarked: Bool
+
+    @State private var image: CGImage?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(0.4)
+                .overlay {
+                    if let image {
+                        Image(decorative: image, scale: 1)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(isCurrent ? Color.white : Color.white.opacity(0.15), lineWidth: isCurrent ? 2 : 1)
+                )
+                .opacity(isMarked ? 0.45 : 1)
+
+            if isMarked {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(2)
+                    .background(Color.red, in: Circle())
+                    .offset(x: 3, y: -3)
+            }
+        }
+        .task(id: asset.id) {
+            image = await ThumbnailCache.shared.image(for: asset.id, target: 120)
+        }
     }
 }
 
