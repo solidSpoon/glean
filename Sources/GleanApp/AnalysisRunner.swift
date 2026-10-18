@@ -8,6 +8,9 @@ import GleanCore
 @MainActor
 final class AnalysisRunner: ObservableObject {
     @Published private(set) var running = false
+    @Published private(set) var scanning = false
+    @Published private(set) var scanDone = 0
+    @Published private(set) var scanTotal = 0
     @Published private(set) var phase = ""
     @Published private(set) var progressLabel = ""
     @Published private(set) var progressValue: Double = 0
@@ -30,6 +33,39 @@ final class AnalysisRunner: ObservableObject {
     /// 有评分结果就用评分结果，否则返回骨架。
     func group(_ id: Int) -> AnalyzedGroup? {
         scored[id] ?? groups.first { $0.id == id }
+    }
+
+    // MARK: - 读取相册
+
+    /// 必须跑在后台线程。
+    ///
+    /// `PHFetchResult.enumerateObjects` + `PHAssetResource.assetResources(for:)` 是
+    /// 同步阻塞调用，如果在主线程跑（`Task {}` 在 @MainActor 方法里会继承主线程），
+    /// 界面会整个冻住，进度条一次都刷不出来。
+    func scanLibrary() async -> [GleanAsset] {
+        guard !scanning else { return [] }
+        scanning = true
+        scanDone = 0
+        scanTotal = 0
+        defer { scanning = false }
+
+        let started = Date()
+        let loaded = await Task.detached(priority: .userInitiated) { [self] in
+            LibraryScanner.loadAssets { done, total in
+                Task { @MainActor in
+                    scanDone = done
+                    scanTotal = total
+                }
+            }
+        }.value
+
+        let seconds = Date().timeIntervalSince(started)
+        log.info("scan.done", [
+            "assets": loaded.count,
+            "seconds": seconds,
+            "perAssetMs": seconds / Double(max(loaded.count, 1)) * 1000,
+        ])
+        return loaded
     }
 
     // MARK: - 主流程

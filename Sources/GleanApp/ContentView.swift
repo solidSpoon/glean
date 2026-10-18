@@ -39,7 +39,6 @@ struct ContentView: View {
     @State private var status: PHAuthorizationStatus = PhotoAccess.current
     @State private var assets: [GleanAsset] = []
     @State private var busy = false
-    @State private var scanProgress: (done: Int, total: Int)?
     @State private var range: AnalysisRange = .month3
     @State private var rangeCounts: [AnalysisRange: Int] = [:]
     @State private var selection: Int?
@@ -257,10 +256,11 @@ struct ContentView: View {
 
     private var statusBar: some View {
         HStack(spacing: 10) {
-            if let scanProgress {
-                ProgressView(value: Double(scanProgress.done), total: Double(max(scanProgress.total, 1)))
+            if runner.scanning {
+                ProgressView(value: Double(runner.scanDone), total: Double(max(runner.scanTotal, 1)))
                     .frame(width: 150)
-                Text("读取相册 \(scanProgress.done)/\(scanProgress.total)")
+                Text(runner.scanTotal > 0 ? "读取相册 \(runner.scanDone)/\(runner.scanTotal)" : "正在读取相册…")
+                    .monospacedDigit()
             } else if runner.running {
                 ProgressView(value: runner.progressValue)
                     .frame(width: 150)
@@ -352,14 +352,9 @@ struct ContentView: View {
 
     private func scan() {
         busy = true
-        scanProgress = (0, 0)
 
         Task {
-            let loaded = LibraryScanner.loadAssets { done, total in
-                Task { @MainActor in
-                    scanProgress = (done, total)
-                }
-            }
+            let loaded = await runner.scanLibrary()
 
             let now = Date()
             var counts: [AnalysisRange: Int] = [:]
@@ -367,12 +362,9 @@ struct ContentView: View {
                 counts[option] = loaded.filter { option.includes($0, now: now) }.count
             }
 
-            await MainActor.run {
-                assets = loaded
-                rangeCounts = counts
-                scanProgress = nil
-                busy = false
-            }
+            assets = loaded
+            rangeCounts = counts
+            busy = false
         }
     }
 
