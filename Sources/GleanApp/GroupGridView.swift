@@ -307,8 +307,13 @@ struct PreviewOverlay: View {
         }
         .onKeyPress(.leftArrow) { step(-1) }
         .onKeyPress(.rightArrow) { step(1) }
+        .onKeyPress(.return) {
+            // 预览里回车 = 切换当前这张的待删除标记，和中间栏保持一致
+            if let asset { onToggleMark?(asset.id) }
+            return .handled
+        }
         .onKeyPress(.space) {
-            // 空格只负责开关预览（第一次打开、第二次退出），标记走按钮
+            // 空格只负责开关预览（第一次打开、第二次退出），标记走回车或按钮
             state = nil
             return .handled
         }
@@ -340,6 +345,7 @@ struct PreviewOverlay: View {
 
             Button {
                 onToggleMark?(asset.id)
+                refocus()
             } label: {
                 Label(
                     isCurrentMarked ? "取消待删除" : "标记待删除",
@@ -394,6 +400,14 @@ struct PreviewOverlay: View {
             onIndexChange?(asset.id)
         }
         return .handled
+    }
+
+    /// 点过按钮后焦点会跑到按钮上，方向键/回车就不再归本视图处理。
+    /// 每次交互后把焦点拉回来，保证键盘全程可用。
+    private func refocus() {
+        DispatchQueue.main.async {
+            focused = true
+        }
     }
 }
 
