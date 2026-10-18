@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # 1. 看这次 push 里有没有值得发版的提交（feat/fix/perf…）。
+  #    有就开一个「chore(master): release x.y.z」PR，里面改好版本号和 CHANGELOG；
+  #    合并那个 PR 时才真正打 tag、建 Release。
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # 2. 刚发版才打包。必须放在同一个 workflow 里用 job 级 if 判断——
+  #    release-please 用 GITHUB_TOKEN 建的 Release 不会触发新的 workflow
+  #    （GitHub 防循环的规则），单开一个 `on: release` 的 workflow 会永远不跑。
+  package:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: macos-26
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+
+      - name: 打包 .app
+        run: CONFIG=release ./scripts/build-app.sh
+
+      # 版本号只有一个来源（project.yml），release-please 已经改过它。
+      # 这里再对一次，防止「tag 是 v0.2.0、app 里还是 0.1.0」这种事故被发出去。
+      - name: 校验版本号与 tag 一致
+        run: |
+          set -euo pipefail
+          PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Graze.app/Contents/Info.plist)"
+          if [ "$PLIST_VERSION" != "${TAG#v}" ]; then
+            echo "::error::tag 是 ${TAG}，但 app 里的版本是 $PLIST_VERSION"
+            exit 1
+          fi
+          echo "版本 $PLIST_VERSION 与 tag $TAG 一致"
+
+      # ditto 而不是 zip(1)：保留符号链接与扩展属性，解压出来的 .app 才不会损坏。
+      # 不加 --sequesterRsrc——它会把扩展属性拆到 __MACOSX/ 里，产物里多一堆垃圾；
+      # 签名本身在 Mach-O 和 _CodeSignature/ 里，跟 xattr 无关。
+      - name: 压缩
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent build/Graze.app "build/graze-${TAG}-arm64.zip"
+
+      # 上传前先把压缩包解回来验一遍：签名在传输/压缩中坏掉的话，
+      # 用户双击会报「已损坏」，而这种问题本地很难复现。
+      - name: 验证压缩包里的 .app 签名完好
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/unpacked
+          mkdir -p /tmp/unpacked
+          ditto -x -k "build/graze-${TAG}-arm64.zip" /tmp/unpacked
+          codesign --verify --deep --strict /tmp/unpacked/Graze.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+            /tmp/unpacked/Graze.app/Contents/Info.plist
+
+      - name: 上传到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "build/graze-${TAG}-arm64.zip" \
+            --repo "$GITHUB_REPOSITORY" --clobber

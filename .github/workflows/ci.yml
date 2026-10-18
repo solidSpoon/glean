@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支上新的推送会取消上一次还没跑完的，省 runner 时间
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 单元测试 + 打包
+    # macOS 26 镜像自带 Xcode 26（SDK 26）。部署目标是 26.0，更低版本的镜像
+    # 编不过——别改成 macos-latest，它的 OS 版本会随 GitHub 的迁移策略漂移。
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具链
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: swift test
+        run: swift test
+
+      # 走和本地完全一样的打包脚本：这一步能抓到「代码能编但 .app 拼不起来」
+      # 这类问题（Info.plist、图标、签名任一缺失都会在这里炸）
+      - name: 打包 .app
+        run: CONFIG=release ./scripts/build-app.sh
+
+      - name: 校验 bundle
+        run: |
+          APP=build/Graze.app
+          test -x "$APP/Contents/MacOS/Graze"
+          test -f "$APP/Contents/Resources/Graze.icns"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist"
+          codesign --verify --deep --strict "$APP"

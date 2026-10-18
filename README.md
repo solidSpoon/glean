@@ -1,6 +1,21 @@
-# graze
+<p align="center">
+  <img src="docs/icon.png" width="128" height="128" alt="graze 图标：一只山羊">
+</p>
 
-> 山羊吃草叫 graze，随手翻照片也叫 graze。留下的那些才是草，其余的都是杂草。
+<h1 align="center">graze</h1>
+
+<p align="center">
+  <strong>山羊吃草叫 graze，随手翻照片也叫 graze。</strong><br>
+  留下的那些才是草，其余的都是杂草。
+</p>
+
+<p align="center">
+  <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
+  <img alt="macOS 26" src="https://img.shields.io/badge/macOS-26-000000?logo=apple&logoColor=white">
+  <img alt="零依赖" src="https://img.shields.io/badge/deps-none-2C3A2E">
+</p>
+
+---
 
 一个 macOS 自用的**相似图片挑拣工具**。目标不是"删重复"（Photos.app 自带的"重复项目"相册已经能做），而是它做不了的部分：
 
@@ -17,7 +32,8 @@
 最后换成山羊 —— 吃杂草的东西，正好对应"把多余的照片清掉"。
 
 图标字形来自 [game-icons.net](https://game-icons.net) 的 `skoll/goat`（CC BY 3.0），
-底板、配色由 `scripts/compose-goat.swift` 生成。
+底板、配色由 `scripts/compose-goat.swift` 生成。README 顶部用的 `docs/icon.png`
+是从 `Resources/Graze.icns` 导出的 256px 版本（GitHub 不认 `.icns`）。
 
 ## 技术栈
 
@@ -171,7 +187,56 @@ Sources/GrazeApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
 Resources/Info.plist     bundle 元数据（含相册用途说明）
 project.yml              Xcode 工程描述（xcodegen 输入）
 scripts/                 打包与启动
+.github/workflows/       ci.yml（测试+打包）、release.yml（发版流水线）
+.release-please-config.json / .release-please-manifest.json   发版配置与当前版本
 ```
+
+## 发版
+
+走 [Release Please](https://github.com/googleapis/release-please)：提交信息决定版本号，
+不需要手动改版本或写 CHANGELOG。
+
+```
+push 到 master
+    ↓  .github/workflows/release.yml
+release-please 判断有没有可发版的提交
+    ↓  有 → 开一个 PR：chore(master): release 0.2.0
+你合并那个 PR
+    ↓
+打 tag v0.2.0 + 建 Release + 生成 CHANGELOG
+    ↓  同一个 workflow 的第二个 job
+macos-26 上打包 → 校验版本号与 tag 一致 → graze-v0.2.0-arm64.zip 挂到 Release
+```
+
+**提交信息必须遵循 Conventional Commits**，否则 release-please 不知道这次该发什么：
+
+| 前缀 | 效果 |
+|---|---|
+| `feat: …` | 次版本号 +1（1.0 之前按 `bump-minor-pre-major` 只升 patch） |
+| `fix: …` | 修订号 +1 |
+| `perf: …` | 修订号 +1 |
+| `refactor:` / `docs:` / `chore:` / `ci:` / `test:` | 不发版（只在 CHANGELOG 里隐藏或忽略） |
+| `feat!: …` 或正文里写 `BREAKING CHANGE:` | 主版本号 +1 |
+
+版本号只有一个来源：`project.yml` 里的 `MARKETING_VERSION`（行尾带
+`# x-release-please-version` 标记，release-please 认这个注释）。`Resources/Info.plist`
+用的是 `$(MARKETING_VERSION)`，两条构建路径都会把它填进去。
+
+`ci.yml` 在每次 push / PR 上跑 `swift test` + 打包 + `codesign --verify`，
+所以「能编但拼不出 .app」这类问题在合并前就会红。
+
+### 下载 release 的人要知道
+
+- **只有 arm64**。runner 是 Apple Silicon，Intel 机器跑不了。
+- **临时签名、未公证**。从浏览器下载的 zip 带 quarantine 属性，双击会提示
+  「已损坏，应移到废纸篓」——不是包坏了，是 Gatekeeper。解开后执行一次：
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Graze.app
+  ```
+
+  之后能正常打开。想彻底免掉这个提示得用开发者 ID 签名 + notarize，那是另一套流程
+  （需要付费账号），自用没必要。
 
 ## 路线
 

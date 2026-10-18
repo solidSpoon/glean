@@ -58,6 +58,19 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/Graze.icns" "$APP/Contents/Resources/Graze.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# 版本号只有一个来源：project.yml 的 MARKETING_VERSION（release-please 会改它）。
+# Xcode 构建时由 xcodebuild 替换 Info.plist 里的 $(MARKETING_VERSION)，手工拼 bundle
+# 没有这一步，所以要自己填——否则两条构建路径会产出不同版本号的 app。
+read_setting() {
+  sed -n "s/^[[:space:]]*$1:[[:space:]]*[\"']\{0,1\}\([^\"'#[:space:]]*\)[\"']\{0,1\}.*$/\1/p" "$ROOT/project.yml" | head -1
+}
+
+VERSION="${GRAZE_VERSION:-$(read_setting MARKETING_VERSION)}"
+VERSION="${VERSION:-0.0.0}"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist" >/dev/null
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist" >/dev/null
+echo "version: $VERSION"
+
 SIGN_ID="${GRAZE_SIGN_ID:--}"
 if [ "$SIGN_ID" = "-" ]; then
   echo "warning: 使用临时签名，重编译后相册授权会失效。设置 GRAZE_SIGN_ID 可避免（见脚本注释）。"
