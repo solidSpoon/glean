@@ -25,7 +25,15 @@ struct AnalyzedGroup: Identifiable {
     let assets: [AnalyzedAsset]
 }
 
-struct PreviewItem: Identifiable {
-    let id: String
-    let name: String
+/// 全屏预览的状态。`index` 是组内下标，用于左右键翻看。
+struct PreviewState: Identifiable {
+    let group: AnalyzedGroup
+    var index: Int
+
+    var id: Int { group.id }
+
+    var asset: AnalyzedAsset? {
+        guard group.assets.indices.contains(index) else { return nil }
+        return group.assets[index]
+    }
 }

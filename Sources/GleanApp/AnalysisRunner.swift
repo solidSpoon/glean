@@ -5,7 +5,8 @@ import GleanCore
 @MainActor
 final class AnalysisRunner: ObservableObject {
     @Published private(set) var running = false
-    @Published private(set) var progress = ""
+    @Published private(set) var progressLabel = ""
+    @Published private(set) var progressValue: Double = 0
     @Published private(set) var groups: [AnalyzedGroup] = []
     @Published private(set) var summary: [String] = []
     @Published private(set) var logLines: [String] = []
@@ -18,7 +19,8 @@ final class AnalysisRunner: ObservableObject {
         running = true
         defer {
             running = false
-            progress = ""
+            progressLabel = ""
+            progressValue = 0
         }
 
         groups = []
@@ -88,7 +90,8 @@ final class AnalysisRunner: ObservableObject {
 
         var built: [AnalyzedGroup] = []
         for (index, group) in raw.enumerated() {
-            progress = "评分 \(index + 1)/\(raw.count)"
+            progressLabel = "评分 \(index + 1)/\(raw.count)"
+            progressValue = 0.7 + 0.3 * Double(index) / Double(raw.count)
             built.append(await analyze(group: group, index: index, byID: byID))
         }
 
@@ -207,7 +210,8 @@ final class AnalysisRunner: ObservableObject {
 
             for (id, vector) in partial { result[id] = vector }
             index = upper
-            progress = "特征 \(result.count)/\(assets.count)"
+            progressLabel = "特征 \(result.count)/\(assets.count)"
+            progressValue = 0.7 * Double(result.count) / Double(max(assets.count, 1))
         }
         return result
     }

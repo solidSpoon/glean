@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "glean",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS("26.0")],
     products: [
         .executable(name: "GleanApp", targets: ["GleanApp"]),
         .library(name: "GleanCore", targets: ["GleanCore"]),

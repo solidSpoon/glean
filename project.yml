@@ -10,7 +10,7 @@ name: glean
 options:
   bundleIdPrefix: com.spoon
   deploymentTarget:
-    macOS: "15.0"
+    macOS: "26.0"
   createIntermediateGroups: true
   groupSortPosition: top
   generateEmptyDirectories: false
@@ -18,7 +18,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     # 自用：不签名团队、临时签名，CI/命令行都能直接构建。
