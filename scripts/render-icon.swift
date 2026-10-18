@@ -1,4 +1,4 @@
-// 图标方案生成器。
+// 图标方案生成器（麦穗系列）。
 // 用法：swift scripts/render-icon.swift
 // 输出：build/icons/*.png 与 build/icons/contact-sheet.png
 import AppKit
@@ -75,7 +75,7 @@ func plate(_ c: CGContext, _ from: UInt32, _ to: UInt32) {
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
     if let gloss = CGGradient(
         colorsSpace: space,
-        colors: [CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.16), CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0)] as CFArray,
+        colors: [CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.15), CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0)] as CFArray,
         locations: [0, 1]
     ) {
         c.drawLinearGradient(
@@ -93,220 +93,177 @@ func plate(_ c: CGContext, _ from: UInt32, _ to: UInt32) {
     c.strokePath()
 }
 
-// MARK: - A 麦穗
+// MARK: - 麦穗基元
 
-func drawWheat(_ c: CGContext) {
-    plate(c, 0x1F4D3A, 0x3A8A64)
-    let gold = rgb(0xF6CE63)
+/// 一粒麦子：底端固定在锚点上，向上伸。
+func drawGrain(
+    _ c: CGContext,
+    at anchor: CGPoint,
+    angle: CGFloat,
+    width: CGFloat,
+    height: CGFloat,
+    color: CGColor,
+    outlined: Bool = false,
+    lineWidth: CGFloat = 14
+) {
+    c.saveGState()
+    c.translateBy(x: anchor.x, y: anchor.y)
+    c.rotate(by: angle)
+    let rect = CGRect(x: -width / 2, y: 0, width: width, height: height)
+    if outlined {
+        c.setStrokeColor(color)
+        c.setLineWidth(lineWidth)
+        c.addEllipse(in: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2))
+        c.strokePath()
+    } else {
+        c.setFillColor(color)
+        c.addEllipse(in: rect)
+        c.fillPath()
+    }
+    c.restoreGState()
+}
 
-    c.setStrokeColor(gold)
-    c.setLineWidth(26)
+/// 尖头麦粒：两端收尖，比椭圆更像谷物。
+func pointedGrainPath(width: CGFloat, height: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: 0, y: 0))
+    path.addQuadCurve(to: CGPoint(x: 0, y: height), control: CGPoint(x: width, y: height * 0.52))
+    path.addQuadCurve(to: CGPoint(x: 0, y: 0), control: CGPoint(x: -width, y: height * 0.52))
+    path.closeSubpath()
+    return path
+}
+
+/// 一支麦穗：茎 + 三对麦粒 + 顶粒。
+func drawStalk(
+    _ c: CGContext,
+    base: CGPoint,
+    length: CGFloat,
+    tilt: CGFloat = 0,
+    stemWidth: CGFloat = 26,
+    grainScale: CGFloat = 1,
+    color: CGColor,
+    rows: Int = 3,
+    outlined: Bool = false
+) {
+    c.saveGState()
+    c.translateBy(x: base.x, y: base.y)
+    c.rotate(by: tilt)
+
+    c.setStrokeColor(color)
+    c.setLineWidth(stemWidth)
     c.setLineCap(.round)
-    c.move(to: CGPoint(x: 512, y: 250))
-    c.addLine(to: CGPoint(x: 512, y: 676))
+    c.move(to: CGPoint(x: 0, y: 0))
+    c.addLine(to: CGPoint(x: 0, y: length * 0.9))
     c.strokePath()
 
-    c.setFillColor(gold)
-    for row in 0..<3 {
-        let y = 318.0 + CGFloat(row) * 112
+    let grainWidth = 88 * grainScale
+    let grainHeight = 146 * grainScale
+
+    for row in 0..<rows {
+        let y = length * 0.30 + CGFloat(row) * length * 0.185
         for side in [CGFloat(-1), CGFloat(1)] {
-            c.saveGState()
-            c.translateBy(x: 512, y: y)
-            c.rotate(by: side * 0.60)
-            c.addEllipse(in: CGRect(x: -42, y: 22, width: 84, height: 138))
-            c.fillPath()
-            c.restoreGState()
+            drawGrain(
+                c,
+                at: CGPoint(x: 0, y: y),
+                angle: side * 0.62,
+                width: grainWidth,
+                height: grainHeight,
+                color: color,
+                outlined: outlined,
+                lineWidth: stemWidth * 0.55
+            )
         }
     }
-    c.saveGState()
-    c.translateBy(x: 512, y: 716)
-    c.addEllipse(in: CGRect(x: -42, y: -16, width: 84, height: 140))
-    c.fillPath()
+
+    drawGrain(
+        c,
+        at: CGPoint(x: 0, y: length * 0.86),
+        angle: 0,
+        width: grainWidth,
+        height: grainHeight * 1.08,
+        color: color,
+        outlined: outlined,
+        lineWidth: stemWidth * 0.55
+    )
+
     c.restoreGState()
 }
 
-// MARK: - B 叠放照片 + 勾
+// MARK: - A 单穗（当前版本，作基准）
 
-func drawStack(_ c: CGContext) {
-    plate(c, 0x2F6BFF, 0x1839BE)
-    let center = CGPoint(x: 512, y: 512)
-
-    // 后面一张：往左上错开并描边，否则两张白卡会糊成一张
-    let backRect = CGRect(x: 512 - 262, y: 512 - 112, width: 452, height: 340)
-    let backPath = roundedRect(backRect, 36, rotate: -0.24, around: center)
-    c.addPath(backPath)
-    c.setFillColor(white(0.32))
-    c.fillPath()
-    c.addPath(backPath)
-    c.setStrokeColor(white(0.45))
-    c.setLineWidth(5)
-    c.strokePath()
-
-    // 前面一张
-    let frontRect = CGRect(x: 512 - 208, y: 512 - 218, width: 466, height: 368)
-    c.addPath(roundedRect(frontRect, 40, rotate: 0.07, around: center))
-    c.setFillColor(white(0.97))
-    c.fillPath()
-
-    // 勾
-    c.setStrokeColor(rgb(0x21C07A))
-    c.setLineWidth(34)
-    c.setLineCap(.round)
-    c.setLineJoin(.round)
-    c.move(to: CGPoint(x: 424, y: 512))
-    c.addLine(to: CGPoint(x: 494, y: 442))
-    c.addLine(to: CGPoint(x: 612, y: 578))
-    c.strokePath()
+func drawSingle(_ c: CGContext) {
+    plate(c, 0x1F4D3A, 0x3A8A64)
+    drawStalk(c, base: CGPoint(x: 512, y: 208), length: 622, color: rgb(0xF6CE63))
 }
 
-// MARK: - C 三张里选一张
+// MARK: - B 双穗交叉
 
-func drawSieve(_ c: CGContext) {
-    plate(c, 0x2F3338, 0x101317)
-    let side: CGFloat = 188
-    let gap: CGFloat = 34
-    let total = side * 3 + gap * 2
-    let originX = (canvas - total) / 2
-    let originY = (canvas - side) / 2
+func drawDouble(_ c: CGContext) {
+    plate(c, 0x1B2B52, 0x2F53A8)
+    let gold = rgb(0xF6CE63)
+    // 两支从同一点抽出去，形成 V 形束；之前分开站容易在中段糊成一团
+    drawStalk(c, base: CGPoint(x: 512, y: 150), length: 660, tilt: 0.24, grainScale: 0.70, color: gold)
+    drawStalk(c, base: CGPoint(x: 512, y: 150), length: 660, tilt: -0.24, grainScale: 0.70, color: gold)
+}
 
-    for index in 0..<3 {
-        let x = originX + CGFloat(index) * (side + gap)
-        let rect = CGRect(x: x, y: originY, width: side, height: side)
-        let selected = index == 1
-        c.addPath(roundedRect(rect, 30))
-        c.setFillColor(selected ? rgb(0xF6CE63) : white(0.20))
-        c.fillPath()
-        if !selected {
-            c.addPath(roundedRect(rect, 30))
-            c.setStrokeColor(white(0.22))
-            c.setLineWidth(4)
-            c.strokePath()
-        }
-    }
+// MARK: - C 拾落穗
 
-    // 选中那张上打个勾
-    c.setStrokeColor(rgb(0x2A2E33))
-    c.setLineWidth(22)
-    c.setLineCap(.round)
-    c.setLineJoin(.round)
-    let centerX = originX + (side + gap) + side / 2
-    let midY = originY + side / 2
-    c.move(to: CGPoint(x: centerX - 42, y: midY + 2))
-    c.addLine(to: CGPoint(x: centerX - 8, y: midY - 36))
-    c.addLine(to: CGPoint(x: centerX + 46, y: midY + 44))
+func drawGleaned(_ c: CGContext) {
+    plate(c, 0x14231C, 0x2A5040)
+    let gold = rgb(0xF6CE63)
+    drawStalk(c, base: CGPoint(x: 470, y: 214), length: 596, tilt: -0.05, grainScale: 0.92, color: gold)
+    // 掉在地上的一粒——"拾"这个动作的落点
+    drawGrain(c, at: CGPoint(x: 646, y: 262), angle: 1.32, width: 96, height: 160, color: gold)
+}
+
+// MARK: - D 圆形徽章
+
+func drawBadge(_ c: CGContext) {
+    plate(c, 0x3A2116, 0x5E3821)
+    let cream = rgb(0xF3DFAE)
+
+    c.setStrokeColor(cream)
+    c.setLineWidth(12)
+    c.addEllipse(in: CGRect(x: 512 - 288, y: 512 - 288, width: 576, height: 576))
     c.strokePath()
+
+    drawStalk(c, base: CGPoint(x: 512, y: 252), length: 528, stemWidth: 22, grainScale: 0.82, color: cream)
 }
 
-// MARK: - D 九宫格里抬起一格
+// MARK: - E 三粒
 
-func drawGrid(_ c: CGContext) {
-    plate(c, 0x6B4CF0, 0x3820B8)
-    let size: CGFloat = 116
-    let gap: CGFloat = 44
-    let total = size * 3 + gap * 2
-    let originX = (canvas - total) / 2
-    let originY = (canvas - total) / 2
-
-    for row in 0..<3 {
-        for col in 0..<3 {
-            let raised = row == 1 && col == 1
-            let scale: CGFloat = raised ? 1.22 : 1
-            let side = size * scale
-            let x = originX + CGFloat(col) * (size + gap) - (side - size) / 2
-            let y = originY + CGFloat(row) * (size + gap) - (side - size) / 2
-            let rect = CGRect(x: x, y: y, width: side, height: side)
-
-            if raised {
-                c.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.45))
-                c.setFillColor(rgb(0xFFD166))
-                c.addPath(roundedRect(rect, 34))
-                c.fillPath()
-                c.setShadow(offset: .zero, blur: 0, color: nil)
-            } else {
-                c.setFillColor(white(0.32))
-                c.addPath(roundedRect(rect, 34))
-                c.fillPath()
-            }
-        }
-    }
-}
-
-// MARK: - E 取景框 + 照片
-
-func drawViewfinder(_ c: CGContext) {
-    plate(c, 0xFF8A3D, 0xD6431F)
-    let ink = white(0.96)
-
-    c.setStrokeColor(ink)
-    c.setLineWidth(26)
-    c.setLineCap(.round)
-
-    let left: CGFloat = 286, right: CGFloat = 738, bottom: CGFloat = 286, top: CGFloat = 738
-    let arm: CGFloat = 132
-    let corners: [(CGPoint, CGPoint, CGPoint)] = [
-        (CGPoint(x: left, y: top - arm), CGPoint(x: left, y: top), CGPoint(x: left + arm, y: top)),
-        (CGPoint(x: right - arm, y: top), CGPoint(x: right, y: top), CGPoint(x: right, y: top - arm)),
-        (CGPoint(x: left, y: bottom + arm), CGPoint(x: left, y: bottom), CGPoint(x: left + arm, y: bottom)),
-        (CGPoint(x: right - arm, y: bottom), CGPoint(x: right, y: bottom), CGPoint(x: right, y: bottom + arm)),
+func drawThreeGrains(_ c: CGContext) {
+    plate(c, 0x2A2E33, 0x14171C)
+    let gold = rgb(0xF6CE63)
+    let spots: [(CGPoint, CGFloat)] = [
+        (CGPoint(x: 424, y: 322), 0.40),
+        (CGPoint(x: 512, y: 468), 0.40),
+        (CGPoint(x: 600, y: 614), 0.40),
     ]
-    for (a, b, d) in corners {
-        c.move(to: a)
-        c.addLine(to: b)
-        c.addLine(to: d)
+    for (point, angle) in spots {
+        c.saveGState()
+        c.translateBy(x: point.x, y: point.y)
+        c.rotate(by: angle)
+        c.addPath(pointedGrainPath(width: 78, height: 250))
+        c.setFillColor(gold)
+        c.fillPath()
+        c.restoreGState()
     }
-    c.strokePath()
-
-    // 框里一张小照片 + 勾
-    c.setFillColor(ink)
-    c.addPath(roundedRect(CGRect(x: 512 - 128, y: 512 - 92, width: 256, height: 184), 24))
-    c.fillPath()
-
-    c.setStrokeColor(rgb(0xD6431F))
-    c.setLineWidth(20)
-    c.setLineCap(.round)
-    c.setLineJoin(.round)
-    c.move(to: CGPoint(x: 448, y: 512))
-    c.addLine(to: CGPoint(x: 494, y: 464))
-    c.addLine(to: CGPoint(x: 580, y: 556))
-    c.strokePath()
 }
 
-// MARK: - F 三张照片扇形
+// MARK: - F 线描
 
-func drawFan(_ c: CGContext) {
-    plate(c, 0x2B3038, 0x14171C)
-    let pivot = CGPoint(x: 512, y: 300)
-    let angles: [CGFloat] = [-0.42, 0, 0.42]
-
-    for (index, angle) in angles.enumerated() {
-        let rect = CGRect(x: 512 - 200, y: 390, width: 400, height: 290)
-        let path = roundedRect(rect, 34, rotate: angle, around: pivot)
-        let alpha: CGFloat = index == 2 ? 0.97 : 0.30
-        c.addPath(path)
-        c.setFillColor(white(alpha))
-        c.fillPath()
-        if index != 2 {
-            c.addPath(path)
-            c.setStrokeColor(white(0.40))
-            c.setLineWidth(5)
-            c.strokePath()
-        }
-    }
-
-    // 最前一张上的勾（跟着旋转）
-    c.saveGState()
-    c.translateBy(x: pivot.x, y: pivot.y)
-    c.rotate(by: 0.42)
-    c.translateBy(x: -pivot.x, y: -pivot.y)
-    c.setStrokeColor(rgb(0x21C07A))
-    c.setLineWidth(30)
-    c.setLineCap(.round)
-    c.setLineJoin(.round)
-    c.move(to: CGPoint(x: 438, y: 560))
-    c.addLine(to: CGPoint(x: 498, y: 500))
-    c.addLine(to: CGPoint(x: 600, y: 616))
-    c.strokePath()
-    c.restoreGState()
+func drawOutline(_ c: CGContext) {
+    plate(c, 0x0E0F12, 0x1D2127)
+    drawStalk(
+        c,
+        base: CGPoint(x: 512, y: 198),
+        length: 630,
+        stemWidth: 26,
+        grainScale: 1.08,
+        color: rgb(0xE8C976),
+        outlined: true
+    )
 }
 
 // MARK: - 渲染
@@ -318,12 +275,12 @@ struct Candidate {
 }
 
 let candidates: [Candidate] = [
-    Candidate(letter: "A", name: "麦穗", draw: drawWheat),
-    Candidate(letter: "B", name: "叠放照片", draw: drawStack),
-    Candidate(letter: "C", name: "三选一", draw: drawSieve),
-    Candidate(letter: "D", name: "九宫格", draw: drawGrid),
-    Candidate(letter: "E", name: "取景框", draw: drawViewfinder),
-    Candidate(letter: "F", name: "扇形照片", draw: drawFan),
+    Candidate(letter: "A", name: "单穗 · 深绿", draw: drawSingle),
+    Candidate(letter: "B", name: "双穗 · 藏蓝", draw: drawDouble),
+    Candidate(letter: "C", name: "拾落穗", draw: drawGleaned),
+    Candidate(letter: "D", name: "徽章 · 暖褐", draw: drawBadge),
+    Candidate(letter: "E", name: "三粒", draw: drawThreeGrains),
+    Candidate(letter: "F", name: "线描", draw: drawOutline),
 ]
 
 var rendered: [(Candidate, CGImage)] = []
