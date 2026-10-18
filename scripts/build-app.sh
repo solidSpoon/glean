@@ -36,7 +36,11 @@ pick_swift() {
     if [ -n "$agreed" ] && [ -n "$installed" ] && [ "$agreed" != "$installed" ]; then
       local clt="/Library/Developer/CommandLineTools/usr/bin/swift"
       if [ -x "$clt" ]; then
-        echo "note: Xcode $installed 的许可证未接受（已接受的是 $agreed），改用 Command Line Tools 工具链。" >&2
+        # 变量一律用 ${} 包起来：紧跟全角标点（如“）” ）时，bash 3.2 在非
+        # UTF-8 locale 下会把标点的首字节当成变量名的一部分，报
+        # “agreed? : unbound variable”。GitHub runner 默认就是 C locale，
+        # 本地 UTF-8 环境下复现不出来。
+        echo "note: Xcode ${installed} 的许可证未接受（已接受的是 ${agreed}），改用 Command Line Tools 工具链。" >&2
         echo "$clt"
         return
       fi
