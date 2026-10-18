@@ -99,6 +99,7 @@ struct ContentView: View {
                     selectedAssetID = group.assets.first?.id
                 }
             }
+            focusPhotoPane()
         }
         .overlay {
             if preview != nil {
@@ -140,8 +141,7 @@ struct ContentView: View {
                         GroupCard(group: group, isSelected: group.id == selection) {
                             selection = group.id
                             selectedAssetID = nil
-                            // 左栏不做键盘导航；点了组就把焦点交给中间栏，方向键立刻可用
-                            photoFocused = true
+                            focusPhotoPane()
                         }
                     }
                 }
@@ -205,6 +205,16 @@ struct ContentView: View {
         .onKeyPress(.rightArrow) { movePhoto(1) }
         .onKeyPress(.space) { openSelectedPhoto() }
         .onKeyPress(.return) { openSelectedPhoto() }
+    }
+
+    /// 把键盘焦点交给中间栏。
+    ///
+    /// 不能同步赋值：点击本身的焦点处理在这之后跑，会把刚设的值覆盖掉，
+    /// 表现就是“点一下没反应、要再点一次中间才生效”。放到下一轮 runloop 才稳。
+    private func focusPhotoPane() {
+        DispatchQueue.main.async {
+            photoFocused = true
+        }
     }
 
     private func movePhoto(_ delta: Int) -> KeyPress.Result {
@@ -408,42 +418,34 @@ struct GroupCard: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                thumbStrip
+        VStack(alignment: .leading, spacing: 6) {
+            thumbStrip
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("第 \(group.id + 1) 组")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("第 \(group.id + 1) 组")
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(.primary)
 
-                    Text(countLine)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                Text(countLine)
+                    .font(.system(size: 10))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .monospacedDigit()
 
-                    Text(detailLine)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                Text(detailLine)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .padding(7)
-            .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.045))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(
-                        isSelected ? Color.accentColor : Color.primary.opacity(0.07),
-                        lineWidth: isSelected ? 2 : 1
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 9))
         }
-        .buttonStyle(.plain)
+        .padding(7)
+        // 选中用底色表示，不描边——卡片平时没有框，选中时只是垫一层
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.accentColor.opacity(0.20) : Color.clear)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture { action() }
         .help("第 \(group.id + 1) 组 · \(group.assets.count) 张")
         .task(id: stripIDs.joined(separator: ",")) {
             var loaded: [String: CGImage] = [:]
