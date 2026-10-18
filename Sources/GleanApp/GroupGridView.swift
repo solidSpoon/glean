@@ -9,9 +9,9 @@ struct GroupDetailView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: Theme.cellSide), spacing: 16)],
+                columns: [GridItem(.adaptive(minimum: Theme.cellSide, maximum: 380), spacing: 20)],
                 alignment: .leading,
-                spacing: 18
+                spacing: 22
             ) {
                 ForEach(Array(group.assets.enumerated()), id: \.element.id) { offset, asset in
                     AssetCell(asset: asset, isKeeper: offset == 0) {
@@ -19,7 +19,7 @@ struct GroupDetailView: View {
                     }
                 }
             }
-            .padding(20)
+            .padding(24)
         }
         .background(.background)
     }

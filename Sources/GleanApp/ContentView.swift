@@ -18,7 +18,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 230, ideal: 260, max: 320)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 460)
         } detail: {
             detail
         }
@@ -167,14 +167,25 @@ struct GroupRow: View {
 
     @State private var thumbnail: CGImage?
 
-    private var subtitle: String {
-        String(format: "%d 张 · %.3f", group.assets.count, group.cohesion)
+    private var countLine: String {
+        String(format: "%d 张 · 凝聚度 %.3f", group.assets.count, group.cohesion)
+    }
+
+    private var detailLine: String {
+        var parts = [
+            group.kind == .photo ? "照片" : "截图",
+            "跨度 " + Theme.duration(group.timeSpan),
+        ]
+        if !group.links.isEmpty {
+            parts.append(Theme.links(group.links))
+        }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: 6)
                     .fill(.quaternary)
                 if let thumbnail {
                     Image(decorative: thumbnail, scale: 1)
@@ -182,28 +193,29 @@ struct GroupRow: View {
                         .aspectRatio(contentMode: .fill)
                 }
             }
-            .frame(width: 34, height: 34)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .frame(width: Theme.sidebarThumb, height: Theme.sidebarThumb)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("第 \(group.id + 1) 组")
-                    .font(.system(size: 12))
-                Text(subtitle)
-                    .font(.system(size: 10))
+                    .font(.system(size: 12, weight: .medium))
+                Text(countLine)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                Text(detailLine)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
             Spacer(minLength: 0)
-
-            Image(systemName: group.kind == .photo ? "photo" : "iphone")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 1)
+        .padding(.vertical, 3)
         .task(id: group.assets.first?.id) {
             guard let id = group.assets.first?.id else { return }
-            thumbnail = await ThumbnailCache.shared.image(for: id, target: 96)
+            thumbnail = await ThumbnailCache.shared.image(for: id, target: 128)
         }
     }
 }
