@@ -1,15 +1,19 @@
 import Foundation
 import GleanCore
 
-/// 把整条管线串起来跑一遍，产出人可读的报告。
-/// 现在它是"验证器"，之后会被拆成后台批处理 + 增量缓存。
+/// 把整条管线串起来，产出结构化结果给人看，同时把每个中间量写进日志。
 @MainActor
 final class AnalysisRunner: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var progress = ""
-    @Published private(set) var report: [String] = []
+    @Published private(set) var groups: [AnalyzedGroup] = []
+    @Published private(set) var summary: [String] = []
+    @Published private(set) var logLines: [String] = []
 
-    func run(assets: [GleanAsset], limit: Int = 300, topGroups: Int = 6) async {
+    let logPath = GleanLog.shared.textURL.path
+    private let log = GleanLog.shared
+
+    func run(assets: [GleanAsset], limit: Int = 300) async {
         guard !running else { return }
         running = true
         defer {
@@ -17,84 +21,155 @@ final class AnalysisRunner: ObservableObject {
             progress = ""
         }
 
-        report = []
-        let sample = Array(assets.prefix(limit))
-        log("样本：最近 \(sample.count) 张（全库 \(assets.count) 张）")
+        groups = []
+        summary = []
+        logLines = []
 
-        let started = Date()
+        let startedAt = Date()
+        let bursts = assets.filter { $0.burstID != nil }.count
+        let screenshots = assets.filter(\.isScreenshot).count
+        log.begin("run \(ISO8601DateFormatter().string(from: startedAt)) limit=\(limit) library=\(assets.count)")
+
+        let sample = Array(assets.prefix(limit))
+        note("样本：最近 \(sample.count) 张（全库 \(assets.count) 张 · 连拍 \(bursts) · 截图 \(screenshots)）")
+        log.info("scan", [
+            "assets": assets.count,
+            "sample": sample.count,
+            "bursts": bursts,
+            "screenshots": screenshots,
+        ])
+
+        let featureStarted = Date()
         let prints = await featurePrints(for: sample)
-        log("特征：\(prints.count)/\(sample.count) 张，\(seconds(since: started))")
+        let featureSeconds = Date().timeIntervalSince(featureStarted)
+        note("特征：\(prints.count)/\(sample.count) 张，\(String(format: "%.1fs", featureSeconds))")
+        log.info("features", [
+            "ok": prints.count,
+            "total": sample.count,
+            "seconds": featureSeconds,
+            "perImageMs": featureSeconds / Double(max(prints.count, 1)) * 1000,
+        ])
 
         let analyzed = sample.filter { prints[$0.id] != nil }
         guard analyzed.count > 1 else {
-            log("可分析的照片不足，先确认相册授权。")
+            note("可分析的照片不足，先确认相册授权。")
+            log.info("abort", ["reason": "not enough analyzable assets"])
             return
         }
+
+        let byID = Dictionary(uniqueKeysWithValues: analyzed.map { ($0.id, $0) })
 
         let sessions = SessionBuilder.build(from: analyzed)
         let sizes = sessions.map(\.count).sorted()
         let median = sizes.isEmpty ? 0 : sizes[sizes.count / 2]
-        log("会话：\(sessions.count) 个（中位 \(median) 张，最大 \(sizes.last ?? 0) 张）")
+        note("会话：\(sessions.count) 个（中位 \(median) 张，最大 \(sizes.last ?? 0) 张）")
+        log.info("sessions", [
+            "count": sessions.count,
+            "median": median,
+            "max": sizes.last ?? 0,
+        ])
 
-        let groupStarted = Date()
-        let groups = Grouping.groups(assets: analyzed, prints: prints)
-        log("分组：\(groups.count) 组 ≥2 张（耗时 \(seconds(since: groupStarted))）")
+        let groupingStarted = Date()
+        let raw = Grouping.groups(assets: analyzed, prints: prints)
+        let photoGroups = raw.filter { $0.kind == .photo }.count
+        let shotGroups = raw.filter { $0.kind == .screenshot }.count
+        note("分组：照片 \(photoGroups) 组 · 截图 \(shotGroups) 组（耗时 \(String(format: "%.2fs", Date().timeIntervalSince(groupingStarted)))）")
+        log.info("grouping", [
+            "groups": raw.count,
+            "photoGroups": photoGroups,
+            "screenshotGroups": shotGroups,
+        ])
 
-        if groups.isEmpty {
-            log("")
-            log("没有发现相似组。这在样本小的时候很正常——继续加大样本量再试。")
+        guard !raw.isEmpty else {
+            note("没有发现相似组。样本小时这很正常。")
+            log.info("done", ["groups": 0])
             return
         }
 
-        let distribution = Dictionary(grouping: groups, by: { min($0.size, 5) })
-            .sorted { $0.key < $1.key }
-            .map { "\($0.key == 5 ? "5+" : "\($0.key)")张×\($0.value.count)" }
-            .joined(separator: "  ")
-        log("分布：\(distribution)")
-        log("")
-
-        let byID = Dictionary(uniqueKeysWithValues: analyzed.map { ($0.id, $0) })
-
-        for (offset, group) in groups.prefix(topGroups).enumerated() {
-            log("── 第 \(offset + 1) 组 ── \(group.size) 张 · 凝聚度 \(String(format: "%.3f", group.cohesion)) · 跨度 \(duration(group.timeSpan)) · \(linkLabel(group.links))")
-
-            var metrics: [AssetMetrics] = []
-            var sharpnessByID: [String: Float] = [:]
-            for assetID in group.assetIDs {
-                guard let asset = byID[assetID] else { continue }
-                guard let image = await Thumbnailer.image(for: assetID) else { continue }
-                let sharpness = ImageQuality.sharpness(of: image)
-                let face = ImageQuality.faceQuality(of: image)
-                sharpnessByID[assetID] = sharpness
-                metrics.append(
-                    AssetMetrics(
-                        assetID: assetID,
-                        sharpness: sharpness,
-                        faceQuality: face.score,
-                        pixelCount: asset.pixelCount
-                    )
-                )
-            }
-
-            for (rank, keeper) in KeeperRanker.rank(metrics).enumerated() {
-                let asset = byID[keeper.assetID]
-                let name = asset?.originalFilename ?? String(keeper.assetID.prefix(12))
-                let marker = rank == 0 ? "▶ 留" : "   "
-                let sharpness = sharpnessByID[keeper.assetID].map { String(format: "%.0f", $0) } ?? "-"
-                let dims = asset.map { "\($0.pixelWidth)×\($0.pixelHeight)" } ?? "-"
-                let burst = (asset?.burstID != nil) ? " ·连拍" : ""
-                log(
-                    "  \(marker) \(name.padding(toLength: max(name.count, 18), withPad: " ", startingAt: 0))"
-                        + " 分 \(String(format: "%.2f", keeper.score))"
-                        + " · \(keeper.reason)"
-                        + " · 清晰度 \(sharpness) · \(dims)\(burst)"
-                )
-            }
-            log("")
+        var built: [AnalyzedGroup] = []
+        for (index, group) in raw.enumerated() {
+            progress = "评分 \(index + 1)/\(raw.count)"
+            built.append(await analyze(group: group, index: index, byID: byID))
         }
+
+        groups = built
+        log.info("done", [
+            "groups": built.count,
+            "seconds": Date().timeIntervalSince(startedAt),
+        ])
     }
 
-    // MARK: - Steps
+    // MARK: - 单组评分
+
+    private func analyze(
+        group: Grouping.Group,
+        index: Int,
+        byID: [String: GleanAsset]
+    ) async -> AnalyzedGroup {
+        var metrics: [AssetMetrics] = []
+
+        for assetID in group.assetIDs {
+            guard let image = await ThumbnailCache.shared.image(for: assetID, target: 512) else {
+                log.debug("metric.missing", ["id": assetID])
+                continue
+            }
+            let sharpness = ImageQuality.sharpness(of: image)
+            let face = ImageQuality.faceQuality(of: image)
+            let asset = byID[assetID]
+
+            var fields: [String: Any] = [
+                "group": index,
+                "id": assetID,
+                "sharpness": Double(sharpness),
+                "faces": face.faceCount,
+            ]
+            if let score = face.score { fields["faceQuality"] = Double(score) }
+            if let asset {
+                fields["name"] = asset.originalFilename ?? ""
+                fields["screenshot"] = asset.isScreenshot ? 1 : 0
+                fields["wh"] = "\(asset.pixelWidth)x\(asset.pixelHeight)"
+            }
+            log.debug("metric", fields)
+
+            metrics.append(
+                AssetMetrics(
+                    assetID: assetID,
+                    sharpness: sharpness,
+                    faceQuality: face.score,
+                    pixelCount: asset?.pixelCount ?? 0
+                )
+            )
+        }
+
+        let sharpnessByID = Dictionary(uniqueKeysWithValues: metrics.map { ($0.assetID, $0.sharpness) })
+
+        let assets = KeeperRanker.rank(metrics).compactMap { keeper -> AnalyzedAsset? in
+            guard let asset = byID[keeper.assetID] else { return nil }
+            return AnalyzedAsset(
+                id: asset.id,
+                name: asset.originalFilename ?? String(asset.id.prefix(12)),
+                pixelWidth: asset.pixelWidth,
+                pixelHeight: asset.pixelHeight,
+                isScreenshot: asset.isScreenshot,
+                hasBurst: asset.burstID != nil,
+                sharpness: sharpnessByID[keeper.assetID] ?? 0,
+                faceQuality: metrics.first { $0.assetID == keeper.assetID }?.faceQuality,
+                score: keeper.score,
+                reason: keeper.reason
+            )
+        }
+
+        return AnalyzedGroup(
+            id: index,
+            kind: group.kind,
+            cohesion: group.cohesion,
+            timeSpan: group.timeSpan,
+            links: group.links,
+            assets: assets
+        )
+    }
+
+    // MARK: - 特征提取
 
     private func featurePrints(for assets: [GleanAsset]) async -> [String: [Float]] {
         var result: [String: [Float]] = [:]
@@ -108,9 +183,19 @@ final class AnalysisRunner: ObservableObject {
             let partial = await withTaskGroup(of: (String, [Float])?.self) { group in
                 for asset in chunk {
                     group.addTask {
-                        guard let image = await Thumbnailer.image(for: asset.id) else { return nil }
-                        guard let vector = try? FeaturePrintService.vector(for: image) else { return nil }
-                        return (asset.id, vector)
+                        guard let image = await Thumbnailer.image(for: asset.id) else {
+                            GleanLog.shared.debug("thumbnail.missing", ["id": asset.id])
+                            return nil
+                        }
+                        do {
+                            return (asset.id, try FeaturePrintService.vector(for: image))
+                        } catch {
+                            GleanLog.shared.debug("feature.failed", [
+                                "id": asset.id,
+                                "error": String(describing: error),
+                            ])
+                            return nil
+                        }
                     }
                 }
                 var collected: [(String, [Float])] = []
@@ -127,27 +212,11 @@ final class AnalysisRunner: ObservableObject {
         return result
     }
 
-    // MARK: - Formatting
+    // MARK: - 输出
 
-    private func log(_ line: String) {
-        report.append(line)
-    }
-
-    private func seconds(since start: Date) -> String {
-        String(format: "%.1fs", Date().timeIntervalSince(start))
-    }
-
-    private func duration(_ interval: TimeInterval) -> String {
-        if interval < 60 { return String(format: "%.0fs", interval) }
-        if interval < 3600 { return String(format: "%.0fmin", interval / 60) }
-        return String(format: "%.1fh", interval / 3600)
-    }
-
-    private func linkLabel(_ links: Set<Grouping.Link>) -> String {
-        var parts: [String] = []
-        if links.contains(.burst) { parts.append("连拍") }
-        if links.contains(.visual) { parts.append("视觉") }
-        if links.contains(.crossSession) { parts.append("跨会话") }
-        return parts.isEmpty ? "—" : parts.joined(separator: "+")
+    private func note(_ line: String) {
+        summary.append(line)
+        logLines.append(line)
+        log.info("note", ["text": line])
     }
 }

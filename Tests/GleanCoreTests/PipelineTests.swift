@@ -169,6 +169,53 @@ final class GroupingTests: XCTestCase {
         XCTAssertEqual(groups.count, 1)
         XCTAssertFalse(groups[0].assetIDs.contains("c"))
     }
+
+    // MARK: - 截图与照片分区
+
+    private func screenshot(_ id: String, offset: TimeInterval) -> GleanAsset {
+        GleanAsset(
+            id: id,
+            pixelWidth: 1179,
+            pixelHeight: 2556,
+            creationDate: base.addingTimeInterval(offset),
+            burstID: nil,
+            isScreenshot: true,
+            isHidden: false,
+            originalFilename: id,
+            modificationDate: nil
+        )
+    }
+
+    /// 照片和截图必须各自聚类。哪怕向量完全相同，也不能揉进一个组——
+    /// 照片那套阈值用在截图上会全军误报。
+    func testScreenshotsClusterSeparatelyFromPhotos() {
+        let assets = [
+            asset("p1", offset: 0),
+            asset("p2", offset: 1),
+            screenshot("s1", offset: 0),
+            screenshot("s2", offset: 1),
+        ]
+        let prints = [
+            "p1": vector(degrees: 0), "p2": vector(degrees: 2),
+            "s1": vector(degrees: 0), "s2": vector(degrees: 2),
+        ]
+        let groups = Grouping.groups(assets: assets, prints: prints)
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups.filter { $0.kind == .photo }.first?.assetIDs.sorted(), ["p1", "p2"])
+        XCTAssertEqual(groups.filter { $0.kind == .screenshot }.first?.assetIDs.sorted(), ["s1", "s2"])
+    }
+
+    /// 同一对相似度（≈0.963）相隔 1 小时：照片会被合并（跨会话阈值 0.88），
+    /// 截图不应该（跨会话阈值 0.98）。这是真实图库里出现过的读数。
+    func testSameSimilarityMergesPhotosButNotScreenshots() {
+        let prints = ["a": vector(degrees: 0), "b": vector(degrees: 15.6)]
+
+        let photos = [asset("a", offset: 0), asset("b", offset: 3600)]
+        XCTAssertEqual(Grouping.groups(assets: photos, prints: prints).count, 1)
+
+        let shots = [screenshot("a", offset: 0), screenshot("b", offset: 3600)]
+        XCTAssertEqual(Grouping.groups(assets: shots, prints: prints).count, 0)
+    }
 }
 
 final class KeeperRankerTests: XCTestCase {

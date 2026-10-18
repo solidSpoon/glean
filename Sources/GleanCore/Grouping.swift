@@ -39,7 +39,7 @@ public struct ThresholdPolicy: Sendable {
     /// 这些数字是**起点，不是结论**，但有一半已经被实测撑住了：
     ///
     /// 合成图实测（同一张照片逐步模糊后的余弦）：2x → 0.85，4x → 0.73，8x → 0.70。
-    /// 也就是说**“糊掉的那一张”——恰恰是你最想清掉的——相似度会明显下降**。
+    /// 也就是说**"糊掉的那一张"——恰恰是你最想清掉的——相似度会明显下降**。
     /// 如果短间隔阈值定在 0.75，那张 4x 模糊的照片就不会进组，工具反而在最该干活的
     /// 地方漏了。所以会话内宁可爱多分组（召回升），不要漏；分了不该分的组，用户扫
     /// 一眼就能看出来，漏掉的那张永远不会自己冒出来。
@@ -54,6 +54,24 @@ public struct ThresholdPolicy: Sendable {
         ],
         crossSessionMinSimilarity: 0.88,
         memberFloor: 0.55
+    )
+
+    /// 截图专用：比照片严格得多。
+    ///
+    /// 截图全是"白底 + 状态栏 + 文字"，FeaturePrint 天然给高分——实测里跨 52 小时的
+    /// 两张截图能到 0.963。不收紧的话，任何两张截图都会被判成"相似照片"。
+    /// 截图只有在几乎是同一屏（滚动了一点、换了个弹窗）时才值得合并。
+    ///
+    /// 这套值完全没有实测支撑（图库里截图样本不够），属于保守估计，同样要 audit。
+    public static let screenshot = ThresholdPolicy(
+        steps: [
+            Step(maxGap: 2, minSimilarity: 0.95),
+            Step(maxGap: 30, minSimilarity: 0.96),
+            Step(maxGap: 300, minSimilarity: 0.97),
+            Step(maxGap: 7200, minSimilarity: 0.975),
+        ],
+        crossSessionMinSimilarity: 0.98,
+        memberFloor: 0.90
     )
 
     public func minSimilarity(forGap gap: TimeInterval) -> Float {
@@ -74,7 +92,14 @@ public enum Grouping {
         case crossSession
     }
 
+    /// 照片和截图分开聚类：它们的最佳阈值差得太多，混在一起两种都会做错。
+    public enum Kind: String, Sendable, Hashable {
+        case photo
+        case screenshot
+    }
+
     public struct Group: Sendable {
+        public let kind: Kind
         public let assetIDs: [String]
         /// 组内最小两两相似度。这是"这组有多可信"的最直接度量。
         public let cohesion: Float
@@ -90,6 +115,7 @@ public enum Grouping {
         assets: [GleanAsset],
         prints: [String: [Float]],
         policy: ThresholdPolicy = .default,
+        screenshotPolicy: ThresholdPolicy = .screenshot,
         maxGap: TimeInterval = 90
     ) -> [Group] {
         var vectors: [String: [Float]] = [:]
@@ -99,6 +125,40 @@ public enum Grouping {
         }
 
         let valid = assets.filter { vectors[$0.id] != nil }
+        guard valid.count > 1 else { return [] }
+
+        let photos = cluster(
+            valid.filter { !$0.isScreenshot },
+            vectors: vectors,
+            policy: policy,
+            kind: .photo,
+            maxGap: maxGap
+        )
+        let screenshots = cluster(
+            valid.filter(\.isScreenshot),
+            vectors: vectors,
+            policy: screenshotPolicy,
+            kind: .screenshot,
+            maxGap: maxGap
+        )
+
+        // 照片组排在截图组前面，各自按可信度降序
+        return (photos + screenshots).sorted { lhs, rhs in
+            if lhs.kind != rhs.kind { return lhs.kind == .photo }
+            if abs(lhs.cohesion - rhs.cohesion) > 0.001 { return lhs.cohesion > rhs.cohesion }
+            return lhs.size > rhs.size
+        }
+    }
+
+    // MARK: - Clustering
+
+    private static func cluster(
+        _ valid: [GleanAsset],
+        vectors: [String: [Float]],
+        policy: ThresholdPolicy,
+        kind: Kind,
+        maxGap: TimeInterval
+    ) -> [Group] {
         guard valid.count > 1 else { return [] }
 
         var indexOf: [String: Int] = [:]
@@ -115,29 +175,23 @@ public enum Grouping {
         // 第一阶段：会话内聚类
         var components: [[Int]] = []      // 成员在 valid 中的下标
         var componentSession: [Int] = []  // 所属会话编号
-        var sessionLinks: [Set<Link>] = []
 
         for (sessionIndex, session) in sessions.enumerated() {
             let members = session.assets.compactMap { indexOf[$0.id] }
             guard !members.isEmpty else { continue }
 
-            let (localComponents, links) = clusterSession(
-                members: members,
-                assets: valid,
-                vectors: vectors,
-                policy: policy
-            )
-            for component in localComponents {
+            let local = clusterSession(members: members, assets: valid, vectors: vectors, policy: policy)
+            for component in local {
                 components.append(component)
                 componentSession.append(sessionIndex)
             }
-            sessionLinks.append(links)
         }
 
         // 第二阶段：跨会话只用代表图比较
         var medoidVectors: [[Float]] = []
         for component in components {
-            medoidVectors.append(vectors[valid[medoid(of: component, assets: valid, vectors: vectors)].id]!)
+            let center = medoid(of: component, assets: valid, vectors: vectors)
+            medoidVectors.append(vectors[valid[center].id]!)
         }
 
         var crossUnion = UnionFind(count: components.count)
@@ -159,43 +213,31 @@ public enum Grouping {
         // 第三阶段：剪掉离代表图太远的成员，再组装
         var output: [Group] = []
         for (_, members) in merged {
-            let pruned = prune(
-                members: members,
-                assets: valid,
-                vectors: vectors,
-                floor: policy.memberFloor
-            )
+            let pruned = prune(members: members, assets: valid, vectors: vectors, floor: policy.memberFloor)
             guard pruned.count >= 2 else { continue }
 
-            let ids = pruned.map { valid[$0].id }
             let dates = pruned.compactMap { valid[$0].creationDate }
             let span = dates.isEmpty ? 0 : (dates.max()!.timeIntervalSince(dates.min()!))
             output.append(
                 Group(
-                    assetIDs: ids,
+                    kind: kind,
+                    assetIDs: pruned.map { valid[$0].id },
                     cohesion: minPairwiseSimilarity(pruned, vectors: vectors, valid: valid),
                     timeSpan: span,
                     links: links(for: pruned, assets: valid, vectors: vectors, policy: policy, sessionOfAsset: sessionOfAsset)
                 )
             )
         }
-
-        return output.sorted {
-            if abs($0.cohesion - $1.cohesion) > 0.001 { return $0.cohesion > $1.cohesion }
-            return $0.size > $1.size
-        }
+        return output
     }
-
-    // MARK: - Session clustering
 
     private static func clusterSession(
         members: [Int],
         assets: [GleanAsset],
         vectors: [String: [Float]],
         policy: ThresholdPolicy
-    ) -> (components: [[Int]], links: Set<Link>) {
+    ) -> [[Int]] {
         var union = UnionFind(count: members.count)
-        var links: Set<Link> = []
 
         for i in 0..<members.count {
             for j in (i + 1)..<members.count {
@@ -206,7 +248,6 @@ public enum Grouping {
                 // 两个表情，但它们在语义上必然是同一组。
                 if let burst = a.burstID, burst == b.burstID {
                     union.union(i, j)
-                    links.insert(.burst)
                     continue
                 }
 
@@ -215,7 +256,6 @@ public enum Grouping {
                 let similarity = Similarity.cosine(vectors[a.id]!, vectors[b.id]!)
                 if similarity >= policy.minSimilarity(forGap: gap) {
                     union.union(i, j)
-                    links.insert(.visual)
                 }
             }
         }
@@ -224,7 +264,7 @@ public enum Grouping {
         for i in 0..<members.count {
             buckets[union.find(i), default: []].append(members[i])
         }
-        return (Array(buckets.values), links)
+        return Array(buckets.values)
     }
 
     // MARK: - Helpers
