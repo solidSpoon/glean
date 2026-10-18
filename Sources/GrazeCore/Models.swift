@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 只保留后续做「分组 / 选优」真正需要的字段，避免把 PHAsset 传进并发代码里
 /// （PHAsset 不是 Sendable，跨 actor 传会炸）。
-public struct GleanAsset: Sendable, Identifiable, Hashable {
+public struct GrazeAsset: Sendable, Identifiable, Hashable {
     /// PHAsset.localIdentifier —— 在同一个 Photos 库里长期稳定，适合当主键。
     public let id: String
     public let pixelWidth: Int

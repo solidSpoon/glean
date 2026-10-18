@@ -1,4 +1,4 @@
-import GleanCore
+import GrazeCore
 import Photos
 import SwiftUI
 
@@ -28,7 +28,7 @@ enum AnalysisRange: String, CaseIterable, Identifiable {
         }
     }
 
-    func includes(_ asset: GleanAsset, now: Date) -> Bool {
+    func includes(_ asset: GrazeAsset, now: Date) -> Bool {
         guard let months else { return true }
         guard let date = asset.creationDate else { return false }
         return date >= now.addingTimeInterval(-Double(months) * 30 * 86_400)
@@ -37,7 +37,7 @@ enum AnalysisRange: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @State private var status: PHAuthorizationStatus = PhotoAccess.current
-    @State private var assets: [GleanAsset] = []
+    @State private var assets: [GrazeAsset] = []
     @State private var busy = false
     @State private var range: AnalysisRange = .month3
     @State private var rangeCounts: [AnalysisRange: Int] = [:]
@@ -85,7 +85,7 @@ struct ContentView: View {
 
             statusBar
         }
-        .navigationTitle(selectedGroup.map { "第 \($0.id + 1) 组" } ?? "glean")
+        .navigationTitle(selectedGroup.map { "第 \($0.id + 1) 组" } ?? "graze")
         .navigationSubtitle(selectedGroup.map(subtitle) ?? "")
         .toolbar { toolbar }
         .frame(minWidth: 1060, minHeight: 600)
@@ -95,7 +95,6 @@ struct ContentView: View {
                 focusedID = nil
                 return
             }
-            await runner.ensureScored(id)
             if let group = runner.group(id) {
                 let existing = group.assets.filter { selectedIDs.contains($0.id) }
                 if existing.isEmpty, let first = group.assets.first {
@@ -187,28 +186,23 @@ struct ContentView: View {
     private var photoPane: some View {
         Group {
             if let group = selectedGroup {
-                if group.isScored {
-                    GroupDetailView(
-                        group: group,
-                        selectedIDs: selectedIDs,
-                        marked: marks.marked,
-                        onSelect: { id, additive in
-                            select(id, additive: additive)
-                        },
-                        onOpen: { index in
-                            let asset = group.assets[index]
-                            selectedIDs = [asset.id]
-                            focusedID = asset.id
-                            preview = PreviewState(group: group, index: index)
-                        },
-                        onToggleMark: { id in
-                            toggleMark(id)
-                        }
-                    )
-                } else {
-                    ProgressView("正在计算清晰度…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                GroupDetailView(
+                    group: group,
+                    selectedIDs: selectedIDs,
+                    marked: marks.marked,
+                    onSelect: { id, additive in
+                        select(id, additive: additive)
+                    },
+                    onOpen: { index in
+                        let asset = group.assets[index]
+                        selectedIDs = [asset.id]
+                        focusedID = asset.id
+                        preview = PreviewState(group: group, index: index)
+                    },
+                    onToggleMark: { id in
+                        toggleMark(id)
+                    }
+                )
             } else {
                 ContentUnavailableView(
                     runner.groups.isEmpty ? "还没有相似组" : "选择一个组",
@@ -246,7 +240,7 @@ struct ContentView: View {
     }
 
     private func movePhoto(_ delta: Int) -> KeyPress.Result {
-        guard let group = selectedGroup, group.isScored, !group.assets.isEmpty else { return .ignored }
+        guard let group = selectedGroup, !group.assets.isEmpty else { return .ignored }
         guard let current = focusedID,
               let index = group.assets.firstIndex(where: { $0.id == current }) else {
             let first = group.assets.first
@@ -263,7 +257,7 @@ struct ContentView: View {
     }
 
     private func openFocusedPhoto() -> KeyPress.Result {
-        guard let group = selectedGroup, group.isScored, let id = focusedID,
+        guard let group = selectedGroup, let id = focusedID,
               let index = group.assets.firstIndex(where: { $0.id == id }) else { return .ignored }
         preview = PreviewState(group: group, index: index)
         return .handled

@@ -1,4 +1,4 @@
-// 「glean」图标 · 第四批：符号型，米白底 + 墨色
+// 「graze」图标 · 第五批：写实的麦穗（带麦芒），米白底墨色
 import AppKit
 import CoreGraphics
 
@@ -6,10 +6,10 @@ let canvas: CGFloat = 1024
 let dir = "build/icons"
 try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
-let ink: UInt32 = 0x23302A
-let accent: UInt32 = 0xC2622F
-let paper: UInt32 = 0xF5EEE1
-let paperDeep: UInt32 = 0xE3D5BE
+let paper: UInt32 = 0xF6EFE2
+let paperDeep: UInt32 = 0xE7DAC4
+let ink: UInt32 = 0x2C3A2E
+let ochre: UInt32 = 0xB06A34
 
 func makeContext(_ w: Int, _ h: Int) -> CGContext {
     CGContext(
@@ -48,147 +48,223 @@ func plate(_ c: CGContext, _ from: UInt32, _ to: UInt32) {
     c.strokePath()
 }
 
-func grainPath(_ width: CGFloat, _ height: CGFloat) -> CGPath {
+// MARK: - 麦穗（带芒）
+
+/// 尖头麦粒路径：底端在原点，向上长。
+func grainPath(_ w: CGFloat, _ h: CGFloat) -> CGPath {
     let p = CGMutablePath()
     p.move(to: CGPoint(x: 0, y: 0))
-    p.addQuadCurve(to: CGPoint(x: 0, y: height), control: CGPoint(x: width, y: height * 0.5))
-    p.addQuadCurve(to: CGPoint(x: 0, y: 0), control: CGPoint(x: -width, y: height * 0.5))
+    p.addQuadCurve(to: CGPoint(x: 0, y: h), control: CGPoint(x: w, y: h * 0.46))
+    p.addQuadCurve(to: CGPoint(x: 0, y: 0), control: CGPoint(x: -w, y: h * 0.46))
     p.closeSubpath()
     return p
 }
 
-func fillGrain(_ c: CGContext, at anchor: CGPoint, angle: CGFloat, w: CGFloat, h: CGFloat, color: CGColor) {
+/// 画一支麦穗：茎 + 若干对麦粒 + 顶粒，每粒都拖一根麦芒。
+func wheatEar(
+    _ c: CGContext,
+    base: CGPoint,
+    height: CGFloat,
+    tilt: CGFloat = 0,
+    bend: CGFloat = 10,
+    stemWidth: CGFloat = 16,
+    grainWidth: CGFloat = 74,
+    grainHeight: CGFloat = 132,
+    pairs: Int = 4,
+    awnLength: CGFloat = 118,
+    awnWidth: CGFloat = 7,
+    bodyColor: CGColor,
+    awnColor: CGColor
+) {
     c.saveGState()
-    c.translateBy(x: anchor.x, y: anchor.y)
-    c.rotate(by: angle)
-    c.addPath(grainPath(w, h))
-    c.setFillColor(color)
-    c.fillPath()
-    c.restoreGState()
-}
+    c.translateBy(x: base.x, y: base.y)
+    c.rotate(by: tilt)
 
-func strokeGrain(_ c: CGContext, at anchor: CGPoint, angle: CGFloat, w: CGFloat, h: CGFloat, width: CGFloat, color: CGColor) {
-    c.saveGState()
-    c.translateBy(x: anchor.x, y: anchor.y)
-    c.rotate(by: angle)
-    c.addPath(grainPath(w, h))
-    c.setStrokeColor(color)
-    c.setLineWidth(width)
-    c.setLineJoin(.round)
-    c.strokePath()
-    c.restoreGState()
-}
-
-// MARK: - 1 墨粒 + 挖空勾
-
-func drawGrainCheck(_ c: CGContext) {
-    plate(c, paper, paperDeep)
-
-    c.saveGState()
-    c.translateBy(x: 512, y: 236)
-    c.setShadow(offset: CGSize(width: 0, height: -14), blur: 40, color: rgb(ink, 0.30))
-    c.addPath(grainPath(216, 512))
-    c.setFillColor(rgb(ink))
-    c.fillPath()
-    c.restoreGState()
-
-    c.setStrokeColor(rgb(paper))
-    c.setLineWidth(46)
+    // 茎（略弯，比直线有生气）
+    c.setStrokeColor(bodyColor)
+    c.setLineWidth(stemWidth)
     c.setLineCap(.round)
-    c.setLineJoin(.round)
-    c.move(to: CGPoint(x: 432, y: 470))
-    c.addLine(to: CGPoint(x: 492, y: 402))
-    c.addLine(to: CGPoint(x: 598, y: 538))
-    c.strokePath()
-}
-
-// MARK: - 2 粗笔几何穗
-
-func drawEarMark(_ c: CGContext) {
-    plate(c, paper, paperDeep)
-    let line = rgb(ink)
-
-    c.setStrokeColor(line)
-    c.setLineWidth(40)
-    c.setLineCap(.round)
-    c.move(to: CGPoint(x: 512, y: 246))
-    c.addLine(to: CGPoint(x: 512, y: 690))
+    c.move(to: .zero)
+    c.addQuadCurve(
+        to: CGPoint(x: bend, y: height * 0.82),
+        control: CGPoint(x: -bend * 0.4, y: height * 0.45)
+    )
     c.strokePath()
 
-    c.setLineWidth(38)
-    for row in 0..<3 {
-        let y = 372.0 + CGFloat(row) * 104
+    let earTop = height * 0.86
+    let span = earTop - height * 0.30
+
+    for row in 0..<pairs {
+        let t = pairs == 1 ? 0 : CGFloat(row) / CGFloat(pairs - 1)
+        let y = height * 0.30 + span * t * 0.86
+        let x = bend * pow(t, 2) * 0.9
+
         for side in [CGFloat(-1), CGFloat(1)] {
-            c.move(to: CGPoint(x: 512, y: y))
-            c.addLine(to: CGPoint(x: 512 + side * 132, y: y + 104))
+            c.saveGState()
+            c.translateBy(x: x, y: y)
+            c.rotate(by: side * 0.60)
+
+            c.addPath(grainPath(grainWidth, grainHeight))
+            c.setFillColor(bodyColor)
+            c.fillPath()
+
+            // 麦芒：从麦粒尖端继续往外
+            c.saveGState()
+            c.translateBy(x: 0, y: grainHeight * 0.94)
+            c.rotate(by: side * 0.22)
+            c.setStrokeColor(awnColor)
+            c.setLineWidth(awnWidth)
+            c.setLineCap(.round)
+            c.move(to: .zero)
+            c.addLine(to: CGPoint(x: 0, y: awnLength))
+            c.strokePath()
+            c.restoreGState()
+
+            c.restoreGState()
         }
     }
-    c.strokePath()
 
-    // 顶端一粒，让符号有个重点
-    fillGrain(c, at: CGPoint(x: 512, y: 726), angle: 0, w: 96, h: 150, color: rgb(accent))
-}
-
-// MARK: - 3 实心粒 + 描边重影
-
-func drawGhost(_ c: CGContext) {
-    plate(c, paper, paperDeep)
-
-    strokeGrain(c, at: CGPoint(x: 392, y: 384), angle: 0.22, w: 150, h: 340, width: 20, color: rgb(ink, 0.35))
-    fillGrain(c, at: CGPoint(x: 556, y: 300), angle: 0, w: 178, h: 420, color: rgb(ink))
-}
-
-// MARK: - 4 一排里挑出一粒
-
-func drawLifted(_ c: CGContext) {
-    plate(c, paper, paperDeep)
-
-    let xs: [CGFloat] = [330, 400, 624, 694]
-    for x in xs {
-        strokeGrain(c, at: CGPoint(x: x, y: 330), angle: 0, w: 62, h: 150, width: 16, color: rgb(ink, 0.45))
-    }
-
+    // 顶粒 + 两根芒
     c.saveGState()
-    c.setShadow(offset: CGSize(width: 0, height: -10), blur: 30, color: rgb(ink, 0.28))
-    fillGrain(c, at: CGPoint(x: 512, y: 340), angle: 0, w: 150, h: 372, color: rgb(accent))
+    c.translateBy(x: bend, y: earTop - grainHeight * 0.2)
+    c.addPath(grainPath(grainWidth * 0.92, grainHeight * 1.1))
+    c.setFillColor(bodyColor)
+    c.fillPath()
+
+    c.setStrokeColor(awnColor)
+    c.setLineWidth(awnWidth)
+    c.setLineCap(.round)
+    for side in [CGFloat(-1), CGFloat(1)] {
+        c.saveGState()
+        c.translateBy(x: 0, y: grainHeight * 1.02)
+        c.rotate(by: side * 0.30)
+        c.move(to: .zero)
+        c.addLine(to: CGPoint(x: 0, y: awnLength * 1.05))
+        c.strokePath()
+        c.restoreGState()
+    }
+    c.restoreGState()
+
     c.restoreGState()
 }
 
-// MARK: - 5 带芒的一粒
+// MARK: - 1 单穗直立
 
-func drawAwned(_ c: CGContext) {
+func drawSingle(_ c: CGContext) {
     plate(c, paper, paperDeep)
+    wheatEar(
+        c, base: CGPoint(x: 512, y: 176), height: 640,
+        bodyColor: rgb(ink), awnColor: rgb(ink, 0.75)
+    )
+}
 
-    fillGrain(c, at: CGPoint(x: 512, y: 262), angle: 0, w: 172, h: 392, color: rgb(ink))
+// MARK: - 2 单穗自然倾斜
 
-    c.setStrokeColor(rgb(accent))
-    c.setLineWidth(30)
+func drawLeaning(_ c: CGContext) {
+    plate(c, paper, paperDeep)
+    wheatEar(
+        c, base: CGPoint(x: 470, y: 168), height: 660, tilt: -0.14, bend: 26,
+        grainWidth: 78, grainHeight: 138,
+        bodyColor: rgb(ink), awnColor: rgb(ink, 0.7)
+    )
+}
+
+// MARK: - 3 双穗并立
+
+func drawPair(_ c: CGContext) {
+    plate(c, paper, paperDeep)
+    wheatEar(
+        c, base: CGPoint(x: 420, y: 170), height: 600, tilt: 0.10, bend: 14,
+        grainWidth: 64, grainHeight: 118, awnLength: 96,
+        bodyColor: rgb(ink), awnColor: rgb(ink, 0.65)
+    )
+    wheatEar(
+        c, base: CGPoint(x: 592, y: 170), height: 650, tilt: -0.08, bend: 18,
+        grainWidth: 68, grainHeight: 124, awnLength: 100,
+        bodyColor: rgb(ochre), awnColor: rgb(ochre, 0.65)
+    )
+}
+
+// MARK: - 4 穗 + 脚边散落的粒
+
+func drawWithGrains(_ c: CGContext) {
+    plate(c, paper, paperDeep)
+    wheatEar(
+        c, base: CGPoint(x: 470, y: 250), height: 560, tilt: -0.06, bend: 18,
+        grainWidth: 72, grainHeight: 128, awnLength: 108,
+        bodyColor: rgb(ink), awnColor: rgb(ink, 0.7)
+    )
+
+    // 掉在地上的三粒（就是"拾"的对象）
+    let drops: [(CGPoint, CGFloat)] = [
+        (CGPoint(x: 646, y: 232), 1.35),
+        (CGPoint(x: 700, y: 286), 1.15),
+        (CGPoint(x: 744, y: 214), 1.45),
+    ]
+    for (anchor, angle) in drops {
+        c.saveGState()
+        c.translateBy(x: anchor.x, y: anchor.y)
+        c.rotate(by: angle)
+        c.addPath(grainPath(52, 96))
+        c.setFillColor(rgb(ochre))
+        c.fillPath()
+        c.restoreGState()
+    }
+}
+
+// MARK: - 5 穗特写（只画上半截）
+
+func drawCloseUp(_ c: CGContext) {
+    plate(c, paper, paperDeep)
+    wheatEar(
+        c, base: CGPoint(x: 512, y: 120), height: 470,
+        stemWidth: 20, grainWidth: 96, grainHeight: 168, pairs: 4, awnLength: 150, awnWidth: 9,
+        bodyColor: rgb(ink), awnColor: rgb(ink, 0.7)
+    )
+    // 茎在底部延伸出画
+    c.setStrokeColor(rgb(ink))
+    c.setLineWidth(20)
     c.setLineCap(.round)
-    c.move(to: CGPoint(x: 512, y: 690))
-    c.addLine(to: CGPoint(x: 404, y: 826))
-    c.move(to: CGPoint(x: 512, y: 690))
-    c.addLine(to: CGPoint(x: 620, y: 826))
+    c.move(to: CGPoint(x: 512, y: 120))
+    c.addLine(to: CGPoint(x: 512, y: 150))
     c.strokePath()
 }
 
-// MARK: - 6 印章
+// MARK: - 6 麦茬 + 一支穗
 
-func drawSeal(_ c: CGContext) {
+func drawStubble(_ c: CGContext) {
     plate(c, paper, paperDeep)
 
-    c.setStrokeColor(rgb(ink))
-    c.setLineWidth(30)
-    c.addEllipse(in: CGRect(x: 512 - 282, y: 512 - 282, width: 564, height: 564))
-    c.strokePath()
-
-    fillGrain(c, at: CGPoint(x: 512, y: 636), angle: 0, w: 128, h: 300, color: rgb(accent))
-
-    c.setStrokeColor(rgb(ink, 0.8))
-    c.setLineWidth(26)
+    // 割过的麦茬
+    c.setStrokeColor(rgb(ink, 0.28))
+    c.setLineWidth(14)
     c.setLineCap(.round)
-    c.move(to: CGPoint(x: 420, y: 340))
-    c.addLine(to: CGPoint(x: 604, y: 340))
+    for x in [300.0, 356.0, 412.0, 660.0] {
+        c.move(to: CGPoint(x: CGFloat(x), y: 210))
+        c.addLine(to: CGPoint(x: CGFloat(x), y: 300))
+    }
     c.strokePath()
+
+    c.setStrokeColor(rgb(ink, 0.28))
+    c.setLineWidth(8)
+    c.move(to: CGPoint(x: 280, y: 210))
+    c.addLine(to: CGPoint(x: 744, y: 210))
+    c.strokePath()
+
+    wheatEar(
+        c, base: CGPoint(x: 540, y: 210), height: 600, tilt: 0.04, bend: 16,
+        grainWidth: 74, grainHeight: 130, awnLength: 110,
+        bodyColor: rgb(ink), awnColor: rgb(ink, 0.7)
+    )
+
+    // 倒在地上的一支
+    c.saveGState()
+    c.translateBy(x: 646, y: 196)
+    c.rotate(by: 1.42)
+    c.addPath(grainPath(60, 300))
+    c.setFillColor(rgb(ochre))
+    c.fillPath()
+    c.restoreGState()
 }
 
 // MARK: - 渲染
@@ -200,12 +276,12 @@ struct Candidate {
 }
 
 let candidates: [Candidate] = [
-    Candidate(letter: "1", name: "墨粒 + 勾", draw: drawGrainCheck),
-    Candidate(letter: "2", name: "几何穗", draw: drawEarMark),
-    Candidate(letter: "3", name: "实粒 + 重影", draw: drawGhost),
-    Candidate(letter: "4", name: "一排挑一粒", draw: drawLifted),
-    Candidate(letter: "5", name: "芒粒", draw: drawAwned),
-    Candidate(letter: "6", name: "印章", draw: drawSeal),
+    Candidate(letter: "1", name: "单穗直立", draw: drawSingle),
+    Candidate(letter: "2", name: "单穗倾斜", draw: drawLeaning),
+    Candidate(letter: "3", name: "双穗", draw: drawPair),
+    Candidate(letter: "4", name: "穗 + 落粒", draw: drawWithGrains),
+    Candidate(letter: "5", name: "穗特写", draw: drawCloseUp),
+    Candidate(letter: "6", name: "麦茬 + 穗", draw: drawStubble),
 ]
 
 var rendered: [(Candidate, CGImage)] = []
@@ -256,23 +332,19 @@ if let image = sheet.makeImage() {
 
 print("rendered \(rendered.count) → \(dir)")
 
-// MARK: - 小尺寸验证：16 / 32 / 64 px 放大看轮廓是否还成立
-let sizes: [Int] = [16, 32, 64]
+// 小尺寸验证：16 / 32 / 64 px
 let strip = makeContext(1200, 400)
-strip.setFillColor(rgb(0xEDE4D2))
+strip.setFillColor(rgb(paperDeep))
 strip.fill(CGRect(x: 0, y: 0, width: 1200, height: 400))
 strip.interpolationQuality = .none
-
-for (index, size) in sizes.enumerated() {
+for (index, size) in [16, 32, 64].enumerated() {
     let small = makeContext(size, size)
     small.scaleBy(x: CGFloat(size) / canvas, y: CGFloat(size) / canvas)
-    drawGrainCheck(small)
+    drawWithGrains(small)
     guard let image = small.makeImage() else { continue }
     let up = CGFloat(size) * 4
-    let x = 120 + CGFloat(index) * 360
-    strip.draw(image, in: CGRect(x: x, y: 200 - up / 2, width: up, height: up))
+    strip.draw(image, in: CGRect(x: 120 + CGFloat(index) * 360, y: 200 - up / 2, width: up, height: up))
 }
-
 if let image = strip.makeImage() {
     let rep = NSBitmapImageRep(cgImage: image)
     if let data = rep.representation(using: .png, properties: [:]) {

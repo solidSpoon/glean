@@ -117,7 +117,7 @@ public enum Grouping {
     // MARK: - Entry
 
     public static func groups(
-        assets: [GleanAsset],
+        assets: [GrazeAsset],
         prints: [String: [Float]],
         policy: ThresholdPolicy = .default,
         screenshotPolicy: ThresholdPolicy = .screenshot,
@@ -161,7 +161,7 @@ public enum Grouping {
     // MARK: - Clustering
 
     private static func cluster(
-        _ valid: [GleanAsset],
+        _ valid: [GrazeAsset],
         vectors: [String: [Float]],
         policy: ThresholdPolicy,
         kind: Kind,
@@ -242,7 +242,7 @@ public enum Grouping {
 
     private static func clusterSession(
         members: [Int],
-        assets: [GleanAsset],
+        assets: [GrazeAsset],
         vectors: [String: [Float]],
         policy: ThresholdPolicy
     ) -> [[Int]] {
@@ -281,7 +281,7 @@ public enum Grouping {
     /// 组代表图：到组内其他成员相似度之和最大的那个。
     private static func medoid(
         of members: [Int],
-        assets: [GleanAsset],
+        assets: [GrazeAsset],
         vectors: [String: [Float]]
     ) -> Int {
         guard members.count > 1 else { return members[0] }
@@ -303,7 +303,7 @@ public enum Grouping {
     /// 剪枝。但连拍成员豁免——它们的相似度低是正常的（表情变了），不是误合并。
     private static func prune(
         members: [Int],
-        assets: [GleanAsset],
+        assets: [GrazeAsset],
         vectors: [String: [Float]],
         floor: Float
     ) -> [Int] {
@@ -325,7 +325,7 @@ public enum Grouping {
     private static func minPairwiseSimilarity(
         _ members: [Int],
         vectors: [String: [Float]],
-        valid: [GleanAsset]
+        valid: [GrazeAsset]
     ) -> Float {
         guard members.count > 1 else { return 1 }
         var minimum: Float = 1
@@ -343,7 +343,7 @@ public enum Grouping {
 
     private static func links(
         for members: [Int],
-        assets: [GleanAsset],
+        assets: [GrazeAsset],
         vectors: [String: [Float]],
         policy: ThresholdPolicy,
         sessionOfAsset: [String: Int]

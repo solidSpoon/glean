@@ -4,33 +4,35 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>graze</string>
 	<key>CFBundleExecutable</key>
-	<string>Glean</string>
+	<string>Graze</string>
+	<key>CFBundleIconFile</key>
+	<string>Graze</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.spoon.glean</string>
+	<string>com.spoon.graze</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>glean</string>
-	<key>CFBundleDisplayName</key>
-	<string>glean</string>
+	<string>graze</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>15.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Personal use.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>glean 需要读取你的照片库，用于在本地找出相似的照片并帮你挑出要保留的那些。所有分析都在本机完成，不会上传任何内容。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>glean 需要修改照片库的权限，以便把你确认过的多余照片移出图库。</string>
+	<string>graze 需要修改照片库的权限，以便把你确认过的多余照片移出图库。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>graze 需要读取你的照片库，用于在本地找出相似的照片并帮你挑出要保留的那些。所有分析都在本机完成，不会上传任何内容。</string>
 </dict>
 </plist>

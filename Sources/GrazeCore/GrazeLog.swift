@@ -3,19 +3,19 @@ import Foundation
 /// 落盘日志。
 ///
 /// 之前所有诊断都只能靠"跑一下看界面"，出问题无从查证。现在每次运行写两份：
-///   ~/Library/Logs/glean/glean.log    人能读的行日志
-///   ~/Library/Logs/glean/glean.jsonl  一行一个 JSON，方便 grep / jq
+///   ~/Library/Logs/graze/graze.log    人能读的行日志
+///   ~/Library/Logs/graze/graze.jsonl  一行一个 JSON，方便 grep / jq
 ///
 /// 让 agent（或你）在 App 之外直接读文件定位问题，不用截图。
-public final class GleanLog: @unchecked Sendable {
-    public static let shared = GleanLog()
+public final class GrazeLog: @unchecked Sendable {
+    public static let shared = GrazeLog()
 
     public let directory: URL
 
-    public var textURL: URL { directory.appendingPathComponent("glean.log") }
-    public var jsonURL: URL { directory.appendingPathComponent("glean.jsonl") }
+    public var textURL: URL { directory.appendingPathComponent("graze.log") }
+    public var jsonURL: URL { directory.appendingPathComponent("graze.jsonl") }
 
-    private let queue = DispatchQueue(label: "com.spoon.glean.log")
+    private let queue = DispatchQueue(label: "com.spoon.graze.log")
     private let stamp: DateFormatter
     private var textHandle: FileHandle?
     private var jsonHandle: FileHandle?
@@ -26,7 +26,7 @@ public final class GleanLog: @unchecked Sendable {
     private init() {
         let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library")
-        directory = library.appendingPathComponent("Logs/glean", isDirectory: true)
+        directory = library.appendingPathComponent("Logs/graze", isDirectory: true)
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"

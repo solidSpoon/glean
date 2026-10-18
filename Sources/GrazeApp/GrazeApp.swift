@@ -1,13 +1,13 @@
 import SwiftUI
 
 @main
-struct GleanApp: App {
+struct GrazeApp: App {
     init() {
         LaunchEnvironment.warnIfUnbundled()
     }
 
     var body: some Scene {
-        WindowGroup("glean") {
+        WindowGroup("graze") {
             ContentView()
                 .frame(minWidth: 940, minHeight: 640)
         }

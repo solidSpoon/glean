@@ -1,4 +1,4 @@
-import GleanCore
+import GrazeCore
 import SwiftUI
 
 enum Theme {

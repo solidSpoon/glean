@@ -1,6 +1,6 @@
-# glean
+# graze
 
-> 拾穗：收割之后，在田里把还值得留下的那一穗拣出来。
+> 山羊吃草叫 graze，随手翻照片也叫 graze。留下的那些才是草，其余的都是杂草。
 
 一个 macOS 自用的**相似图片挑拣工具**。目标不是"删重复"（Photos.app 自带的"重复项目"相册已经能做），而是它做不了的部分：
 
@@ -11,8 +11,13 @@
 
 ## 命名
 
-`glean` / 显示名 **glean**。包名 `GleanCore`、`GleanApp`，bundle id `com.spoon.glean`。
-备选曾是 `winnow`（扬场）、`bowerbird`（园丁鸟）。
+`graze` / 显示名 **graze**。包名 `GrazeCore`、`GrazeApp`，bundle id `com.spoon.graze`。
+
+取名走过一段弯路：`glean`（拾穗）→ 麦穗图标在 Dock 里一律被读成"农业/除草"，
+最后换成山羊 —— 吃杂草的东西，正好对应"把多余的照片清掉"。
+
+图标字形来自 [game-icons.net](https://game-icons.net) 的 `skoll/goat`（CC BY 3.0），
+底板、配色由 `scripts/compose-goat.swift` 生成。
 
 ## 技术栈
 
@@ -34,7 +39,7 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 
 ## 怎么用
 
-**最短路径：双击 `build/Glean.app`。** 不需要装任何东西，也不用开 Xcode。
+**最短路径：双击 `build/Graze.app`。** 不需要装任何东西，也不用开 Xcode。
 
 打开后：
 
@@ -54,7 +59,7 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 键盘：中栏 `←→` 换照片、`空格` 开关大图、`回车` 标记/取消待删除；
 大图里 `←→` 翻看、`空格` 退出。左栏只用鼠标点击。
 
-**标记待删除 = 加进 `glean 待删除` 相册**（PhotoKit 不暴露关键词，相册就是标签）。
+**标记待删除 = 加进 `graze 待删除` 相册**（PhotoKit 不暴露关键词，相册就是标签）。
 不复制文件，状态存在系统里；之后在 Photos.app 里打开这个相册、全选 `⌘⌫` 就是原生删除，
 30 天内可从“最近删除”恢复。
 
@@ -64,7 +69,7 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 
 **现在还不会删任何东西**——只把「哪几张是一组、该留哪张」算出来给你看。
 
-> ⚠️ 别在 Xcode 里选 `GleanApp` scheme 运行，也别 `swift run`。那是没有 bundle 的裸可执行文件：窗口建不出来、相册也读不到。真跑了它会直接提示你怎么做。
+> ⚠️ 别在 Xcode 里选 `GrazeApp` scheme 运行，也别 `swift run`。那是没有 bundle 的裸可执行文件：窗口建不出来、相册也读不到。真跑了它会直接提示你怎么做。
 
 ## 管线
 
@@ -109,8 +114,8 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 
 1. **必须是 app bundle**。裸可执行文件访问相册会因为缺少 `NSPhotoLibraryUsageDescription` 被系统直接杀掉。所以开发流程是 `swift build` → 拼 `.app` → `open`，不能 `swift run`。
 2. **签名身份要稳定**。ad-hoc 签名每次编译 cdhash 都变，相册授权会反复失效弹窗。建议一次性建自签名证书：
-   钥匙串访问 → 证书助理 → 创建证书 → 名称 `glean-dev`、类型「代码签名」。
-   然后 `GLEAN_SIGN_ID="glean-dev" ./scripts/run.sh`。
+   钥匙串访问 → 证书助理 → 创建证书 → 名称 `graze-dev`、类型「代码签名」。
+   然后 `GRAZE_SIGN_ID="graze-dev" ./scripts/run.sh`。
 3. **macOS 的 `requestImage` 回调给的是 `NSImage`**，不是 `CGImage`（iOS 才是 UIImage）。类型写错时编译器只吐一句 "failed to produce diagnostic"，看不出真正原因。
 
 ## 开发
@@ -126,14 +131,14 @@ swift test                    # 22 个测试
 | | 命令行 | Xcode |
 |---|---|---|
 | 构建 | `Package.swift` + `scripts/build-app.sh` | `project.yml` → `xcodegen` |
-| 产物 | `build/Glean.app` | `build/Glean.app`（同一个路径） |
+| 产物 | `build/Graze.app` | `build/Graze.app`（同一个路径） |
 | 运行 | `./scripts/run.sh` | ⌘R |
 | 测试 | `swift test` | ⌘U |
 
 两条路径都可用，产物落在同一个位置，不会出现同 bundle id 两份 app 让 LaunchServices
 和相册授权搞不清该认哪一个。谁最后构建就是谁。
 
-**Xcode 工程是产物，不是事实来源。** `glean.xcodeproj` 由 `project.yml` 生成且不入库——
+**Xcode 工程是产物，不是事实来源。** `graze.xcodeproj` 由 `project.yml` 生成且不入库——
 pbxproj 是机器生成的 XML，冲突难解、人读不了。在 Xcode 图形界面里改 Build Settings
 只会改到 `.xcodeproj`，下次 `xcodegen generate` 会被覆盖；要持久化的设置请写进 `project.yml`。
 
@@ -144,7 +149,7 @@ pbxproj 是机器生成的 XML，冲突难解、人读不了。在 Xcode 图形�
 默认是临时签名（`CODE_SIGN_IDENTITY: "-"`，等价于 Xcode 里的
 "Sign to Run Locally"），不需要开发者账号就能构建。但临时签名每次编译 cdhash 都变，
 相册授权会反复失效弹窗。想固定身份：把 `project.yml` 里的 `CODE_SIGN_IDENTITY` 换成你
-自签名证书的通用名（如 `glean-dev`），命令行和 Xcode 就都稳定了。
+自签名证书的通用名（如 `graze-dev`），命令行和 Xcode 就都稳定了。
 
 如果 Xcode 升级后许可证未接受，`swift build` 会报 *"You have not agreed to the Xcode
 license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Command Line Tools 的
@@ -152,8 +157,8 @@ license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Comman
 `/Library/Developer/CommandLineTools/usr/bin/swift test`。
 
 ```
-Sources/GleanCore/       纯逻辑，不依赖 UI
-  Models.swift           GleanAsset / FeaturePrint
+Sources/GrazeCore/       纯逻辑，不依赖 UI
+  Models.swift           GrazeAsset / FeaturePrint
   PhotoLibrary.swift     授权、资产枚举、缩略图
   FeaturePrintService.swift  Vision 特征提取
   Session.swift          时间切片
@@ -161,7 +166,7 @@ Sources/GleanCore/       纯逻辑，不依赖 UI
   ImageQuality.swift     清晰度 / 人脸质量
   KeeperRanker.swift     组内选优
   Clustering.swift       并查集 + 余弦
-Sources/GleanApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
+Sources/GrazeApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
 Resources/Info.plist     bundle 元数据（含相册用途说明）
 project.yml              Xcode 工程描述（xcodegen 输入）
 scripts/                 打包与启动
@@ -180,6 +185,6 @@ scripts/                 打包与启动
 **不做永久删除。** 两条路径：
 
 1. 首选 `PHAssetChangeRequest.deleteAssets` —— 进 Photos 的"最近删除"，30 天内可恢复
-2. 需要立刻释放磁盘时，`PHAssetResourceManager` 导出到 `~/Pictures/glean-quarantine/<批次>/` 再删，manifest 记完整路径
+2. 需要立刻释放磁盘时，`PHAssetResourceManager` 导出到 `~/Pictures/graze-quarantine/<批次>/` 再删，manifest 记完整路径
 
 照片是**不可再生数据**。任何"一键清理"按钮都必须能一键撤销。

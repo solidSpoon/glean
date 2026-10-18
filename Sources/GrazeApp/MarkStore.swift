@@ -1,5 +1,5 @@
 import Foundation
-import GleanCore
+import GrazeCore
 
 /// 「待删除」标记的唯一事实来源就是 Photos 里那个相册。
 /// 这里只是把它缓存成 Set 方便 UI 判断，每次操作后立即回读真值。

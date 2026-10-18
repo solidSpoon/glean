@@ -11,7 +11,7 @@ import Photos
 /// 用户在 Photos.app 里打开这个相册、全选、删除，就是原生删除（进"最近删除"，
 /// 30 天内可恢复）。
 public enum DeletionAlbum {
-    public static let title = "glean 待删除"
+    public static let title = "graze 待删除"
 
     public static func fetch() -> PHAssetCollection? {
         let options = PHFetchOptions()

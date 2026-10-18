@@ -1,10 +1,11 @@
 import Foundation
-import GleanCore
+import GrazeCore
 
-/// 三阶段：提特征 → 分组 → （按需）评分。
+/// 两阶段：提特征 → 分组。分组完成即全部完成。
 ///
-/// 评分是软加载的：全库 7624 张时评分要 187 秒，而分组只要 2 秒。没道理为了看一眼
-/// 列表先等三分钟。现在分组一出来就能看到全部组，选中哪组才给哪组算清晰度和人脸。
+/// 早期还做过第三阶段「组内评分」（拉普拉斯清晰度 + 人脸质量，用来推荐保留哪张），
+/// 每次全库要 187 秒。这个工具只负责把重复的挑成一堆，哪张该留人自己看比算法准，
+/// 所以那一层整个拆掉了——现在全库 7624 张从点「分析」到出列表约 41 秒。
 @MainActor
 final class AnalysisRunner: ObservableObject {
     @Published private(set) var running = false
@@ -15,24 +16,19 @@ final class AnalysisRunner: ObservableObject {
     @Published private(set) var progressLabel = ""
     @Published private(set) var progressValue: Double = 0
 
-    /// 分好组的骨架，未评分。
     @Published private(set) var groups: [AnalyzedGroup] = []
-    /// 已评分的组，按需填充。
-    @Published private(set) var scored: [Int: AnalyzedGroup] = [:]
 
     @Published private(set) var summary: [String] = []
     @Published private(set) var logLines: [String] = []
 
-    let logPath = GleanLog.shared.textURL.path
-    private let log = GleanLog.shared
+    let logPath = GrazeLog.shared.textURL.path
+    private let log = GrazeLog.shared
 
     private var prints: [String: [Float]] = [:]
-    private var byID: [String: GleanAsset] = [:]
-    private var scoring: [Int: Task<Void, Never>] = [:]
+    private var byID: [String: GrazeAsset] = [:]
 
-    /// 有评分结果就用评分结果，否则返回骨架。
     func group(_ id: Int) -> AnalyzedGroup? {
-        scored[id] ?? groups.first { $0.id == id }
+        groups.first { $0.id == id }
     }
 
     // MARK: - 读取相册
@@ -42,7 +38,7 @@ final class AnalysisRunner: ObservableObject {
     /// `PHFetchResult.enumerateObjects` + `PHAssetResource.assetResources(for:)` 是
     /// 同步阻塞调用，如果在主线程跑（`Task {}` 在 @MainActor 方法里会继承主线程），
     /// 界面会整个冻住，进度条一次都刷不出来。
-    func scanLibrary() async -> [GleanAsset] {
+    func scanLibrary() async -> [GrazeAsset] {
         guard !scanning else { return [] }
         scanning = true
         scanDone = 0
@@ -70,7 +66,7 @@ final class AnalysisRunner: ObservableObject {
 
     // MARK: - 主流程
 
-    func run(assets: [GleanAsset]) async {
+    func run(assets: [GrazeAsset]) async {
         guard !running else { return }
         running = true
         defer {
@@ -81,8 +77,6 @@ final class AnalysisRunner: ObservableObject {
         }
 
         groups = []
-        scored = [:]
-        scoring = [:]
         summary = []
         logLines = []
 
@@ -144,7 +138,7 @@ final class AnalysisRunner: ObservableObject {
         }
 
         groups = raw.enumerated().map { offset, group in
-            skeleton(group, index: offset)
+            makeGroup(group, index: offset)
         }
 
         progressValue = 1
@@ -154,118 +148,38 @@ final class AnalysisRunner: ObservableObject {
         ])
     }
 
-    // MARK: - 按需评分
+    // MARK: - 组装
 
-    func ensureScored(_ groupID: Int) async {
-        if scored[groupID] != nil { return }
-        if let existing = scoring[groupID] {
-            await existing.value
-            return
-        }
-        guard let base = groups.first(where: { $0.id == groupID }) else { return }
+    /// 把分组结果变成 UI 用的结构。
+    ///
+    /// 组内按拍摄时间正序排列——没有"推荐保留"之后，时间就是唯一有意义的顺序。
+    /// 顺带算一下每张与组内其他成员的相似度区间，纯展示用。
+    private func makeGroup(_ group: Grouping.Group, index: Int) -> AnalyzedGroup {
+        let ids = group.assetIDs
+            .filter { byID[$0] != nil }
+            .sorted { (byID[$0]?.creationDate ?? .distantPast) < (byID[$1]?.creationDate ?? .distantPast) }
 
-        let task = Task { [weak self] in
-            guard let self else { return }
-            let started = Date()
-            if let value = await self.computeScore(for: base) {
-                self.scored[groupID] = value
-                self.log.debug("scored", [
-                    "group": groupID,
-                    "assets": value.assets.count,
-                    "ms": Date().timeIntervalSince(started) * 1000,
-                ])
+        var vectors: [String: [Float]] = [:]
+        for id in ids {
+            if let vector = prints[id] {
+                vectors[id] = Similarity.normalized(vector)
             }
-            self.scoring[groupID] = nil
-        }
-        scoring[groupID] = task
-        await task.value
-    }
-
-    private func computeScore(for base: AnalyzedGroup) async -> AnalyzedGroup? {
-        var metrics: [AssetMetrics] = []
-
-        for asset in base.assets {
-            guard let image = await ThumbnailCache.shared.image(for: asset.id, target: 512) else {
-                log.debug("metric.missing", ["id": asset.id])
-                continue
-            }
-            let sharpness = ImageQuality.sharpness(of: image)
-            let face = ImageQuality.faceQuality(of: image)
-            metrics.append(
-                AssetMetrics(
-                    assetID: asset.id,
-                    sharpness: sharpness,
-                    faceQuality: face.score,
-                    pixelCount: asset.pixelCount
-                )
-            )
-            log.debug("metric", [
-                "group": base.id,
-                "id": asset.id,
-                "name": asset.name,
-                "sharpness": Double(sharpness),
-                "faces": face.faceCount,
-                "faceQuality": face.score.map { Double($0) } ?? NSNull(),
-                "screenshot": asset.isScreenshot ? 1 : 0,
-                "wh": "\(asset.pixelWidth)x\(asset.pixelHeight)",
-            ])
         }
 
-        let ranked = KeeperRanker.rank(metrics)
-        guard let keeper = ranked.first else { return nil }
-
-        let keeperVector = prints[keeper.assetID].map { Similarity.normalized($0) }
-        let metricsByID = Dictionary(uniqueKeysWithValues: metrics.map { ($0.assetID, $0) })
-
-        let assets = ranked.compactMap { entry -> AnalyzedAsset? in
-            guard let asset = byID[entry.assetID] else { return nil }
-
-            var similarity: Float?
-            if let keeperVector, let vector = prints[entry.assetID] {
-                similarity = Similarity.cosine(keeperVector, Similarity.normalized(vector))
-            }
-
-            return AnalyzedAsset(
-                id: asset.id,
-                name: asset.originalFilename ?? String(asset.id.prefix(12)),
-                pixelWidth: asset.pixelWidth,
-                pixelHeight: asset.pixelHeight,
-                creationDate: asset.creationDate,
-                modificationDate: asset.modificationDate,
-                isScreenshot: asset.isScreenshot,
-                hasBurst: asset.burstID != nil,
-                isFavorite: asset.isFavorite,
-                isLivePhoto: asset.isLivePhoto,
-                isPanorama: asset.isPanorama,
-                isHDR: asset.isHDR,
-                isDepthEffect: asset.isDepthEffect,
-                latitude: asset.latitude,
-                longitude: asset.longitude,
-                sharpness: metricsByID[entry.assetID]?.sharpness ?? 0,
-                faceQuality: metricsByID[entry.assetID]?.faceQuality,
-                similarityToKeeper: similarity,
-                score: entry.score,
-                reason: entry.reason
-            )
-        }
-
-        return AnalyzedGroup(
-            id: base.id,
-            kind: base.kind,
-            cohesion: base.cohesion,
-            timeSpan: base.timeSpan,
-            latestDate: base.latestDate,
-            links: base.links,
-            isScored: true,
-            assets: assets
-        )
-    }
-
-    // MARK: - 骨架
-
-    private func skeleton(_ group: Grouping.Group, index: Int) -> AnalyzedGroup {
-        let assets = group.assetIDs.compactMap { id -> AnalyzedAsset? in
+        let assets = ids.compactMap { id -> AnalyzedAsset? in
             guard let asset = byID[id] else { return nil }
+
+            var lower: Float?
+            var upper: Float?
+            if let mine = vectors[id] {
+                for other in ids where other != id {
+                    guard let theirs = vectors[other] else { continue }
+                    let value = Similarity.cosine(mine, theirs)
+                    lower = lower.map { min($0, value) } ?? value
+                    upper = upper.map { max($0, value) } ?? value
+                }
+            }
+
             return AnalyzedAsset(
                 id: asset.id,
                 name: asset.originalFilename ?? String(asset.id.prefix(12)),
@@ -282,13 +196,11 @@ final class AnalysisRunner: ObservableObject {
                 isDepthEffect: asset.isDepthEffect,
                 latitude: asset.latitude,
                 longitude: asset.longitude,
-                sharpness: 0,
-                faceQuality: nil,
-                similarityToKeeper: nil,
-                score: 0,
-                reason: ""
+                similarityMin: lower,
+                similarityMax: upper
             )
         }
+
         return AnalyzedGroup(
             id: index,
             kind: group.kind,
@@ -296,14 +208,13 @@ final class AnalysisRunner: ObservableObject {
             timeSpan: group.timeSpan,
             latestDate: group.latestDate,
             links: group.links,
-            isScored: false,
             assets: assets
         )
     }
 
     // MARK: - 特征提取
 
-    private func featurePrints(for assets: [GleanAsset]) async -> [String: [Float]] {
+    private func featurePrints(for assets: [GrazeAsset]) async -> [String: [Float]] {
         var result: [String: [Float]] = [:]
         let chunkSize = 8
         var index = 0
@@ -316,13 +227,13 @@ final class AnalysisRunner: ObservableObject {
                 for asset in chunk {
                     group.addTask {
                         guard let image = await Thumbnailer.image(for: asset.id) else {
-                            GleanLog.shared.debug("thumbnail.missing", ["id": asset.id])
+                            GrazeLog.shared.debug("thumbnail.missing", ["id": asset.id])
                             return nil
                         }
                         do {
                             return (asset.id, try FeaturePrintService.vector(for: image))
                         } catch {
-                            GleanLog.shared.debug("feature.failed", [
+                            GrazeLog.shared.debug("feature.failed", [
                                 "id": asset.id,
                                 "error": String(describing: error),
                             ])

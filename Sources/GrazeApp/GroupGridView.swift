@@ -1,5 +1,5 @@
 import AppKit
-import GleanCore
+import GrazeCore
 import SwiftUI
 
 /// 中间一栏：选中那一组的照片。单击选中，⌘ 点击多选，双击预览。
@@ -21,7 +21,6 @@ struct GroupDetailView: View {
                 ForEach(Array(group.assets.enumerated()), id: \.element.id) { offset, asset in
                     AssetCell(
                         asset: asset,
-                        isKeeper: offset == 0 && group.isScored,
                         isSelected: selectedIDs.contains(asset.id),
                         isMarked: marked.contains(asset.id)
                     ) { additive in
@@ -41,7 +40,6 @@ struct GroupDetailView: View {
 
 struct AssetCell: View {
     let asset: AnalyzedAsset
-    let isKeeper: Bool
     let isSelected: Bool
     let isMarked: Bool
     let onSelect: (Bool) -> Void
@@ -66,24 +64,14 @@ struct AssetCell: View {
                         .controlSize(.small)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-
-                if isKeeper {
-                    Text("留")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.accentColor, in: Capsule())
-                        .padding(5)
-                }
             }
             .frame(width: Theme.cellSide, height: Theme.cellSide)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(
-                        isSelected ? Color.accentColor : (isKeeper ? Color.accentColor.opacity(0.55) : Color.clear),
-                        lineWidth: isSelected ? 3 : (isKeeper ? 2 : 0)
+                        isSelected ? Color.accentColor : Color.clear,
+                        lineWidth: isSelected ? 3 : 0
                     )
             )
             .overlay(alignment: .bottomTrailing) {
@@ -150,13 +138,6 @@ struct AssetInfoView: View {
                     .textSelection(.enabled)
                     .padding(.bottom, 8)
 
-                if group.isScored {
-                    Text(asset.reason)
-                        .font(.system(size: 11))
-                        .foregroundStyle(asset.score >= 0.999 ? Color.accentColor : .secondary)
-                        .padding(.bottom, 6)
-                }
-
                 if isMarked {
                     Text("已标记待删除")
                         .font(.system(size: 11, weight: .medium))
@@ -188,16 +169,11 @@ struct AssetInfoView: View {
                     row("坐标", String(format: "%.5f, %.5f", latitude, longitude))
                 }
 
-                section("评分")
-                if group.isScored {
-                    row("组内得分", String(format: "%.2f", asset.score))
-                    row("与保留张", asset.similarityToKeeper.map { String(format: "%.3f", $0) } ?? "—")
-                    row("清晰度", String(format: "%.3f", asset.sharpness))
-                    row("人脸质量", asset.faceQuality.map { String(format: "%.2f", $0) } ?? "—")
+                section("相似度")
+                if let low = asset.similarityMin, let high = asset.similarityMax {
+                    row("与组内其他", String(format: "%.3f ~ %.3f", low, high))
                 } else {
-                    Text("正在计算…")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    row("与组内其他", "—")
                 }
 
                 section("所属组")

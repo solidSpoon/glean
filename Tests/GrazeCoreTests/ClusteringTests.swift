@@ -1,5 +1,5 @@
 import XCTest
-@testable import GleanCore
+@testable import GrazeCore
 
 final class ClusteringTests: XCTestCase {
     func testUnionFindGroups() {

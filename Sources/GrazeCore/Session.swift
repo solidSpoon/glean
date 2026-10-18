@@ -5,9 +5,9 @@ import Foundation
 /// 这是整个分组管线的第一刀。时间切片的真正价值不是"分类"，而是**把候选集从
 /// 全库砍到几十张** —— 之后组内才敢用低阈值，全局阈值那套问题自然消失。
 public struct PhotoSession: Sendable {
-    public let assets: [GleanAsset]
+    public let assets: [GrazeAsset]
 
-    public init(assets: [GleanAsset]) {
+    public init(assets: [GrazeAsset]) {
         self.assets = assets
     }
 
@@ -32,18 +32,18 @@ public enum SessionBuilder {
     /// 再往上调（比如两小时，让 0.85 也生效）风险大于收益：会话会膨胀成几百上千张，
     /// 同一房间里的不同东西都可能被 0.78–0.85 拉进一组。
     public static func build(
-        from assets: [GleanAsset],
+        from assets: [GrazeAsset],
         maxGap: TimeInterval = 300
     ) -> [PhotoSession] {
         let dated = assets
-            .compactMap { asset -> (GleanAsset, Date)? in
+            .compactMap { asset -> (GrazeAsset, Date)? in
                 guard let date = asset.creationDate else { return nil }
                 return (asset, date)
             }
             .sorted { $0.1 < $1.1 }
 
-        var sessions: [[GleanAsset]] = []
-        var current: [GleanAsset] = []
+        var sessions: [[GrazeAsset]] = []
+        var current: [GrazeAsset] = []
         var previousDate: Date?
 
         for (asset, date) in dated {

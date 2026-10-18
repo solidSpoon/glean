@@ -1,5 +1,5 @@
 import Foundation
-import GleanCore
+import GrazeCore
 
 struct AnalyzedAsset: Identifiable {
     let id: String
@@ -17,13 +17,10 @@ struct AnalyzedAsset: Identifiable {
     let isDepthEffect: Bool
     let latitude: Double?
     let longitude: Double?
-    /// 拉普拉斯方差（曝光归一化后）。数值本身没有绝对意义，只在组内横向比较。
-    let sharpness: Float
-    let faceQuality: Float?
-    /// 与"建议保留"那张的相似度。自己就是保留张时为 1。
-    let similarityToKeeper: Float?
-    let score: Float
-    let reason: String
+    /// 与组内其他成员的最低 / 最高相似度。纯展示用，不参与任何取舍判断——
+    /// 这个工具只负责把重复的找出来，挑哪张留给人。
+    let similarityMin: Float?
+    let similarityMax: Float?
 
     var fileExtension: String {
         let ext = (name as NSString).pathExtension
@@ -54,9 +51,7 @@ struct AnalyzedGroup: Identifiable {
     /// 组内最新拍摄时间，列表排序依据。
     let latestDate: Date?
     let links: Set<Grouping.Link>
-    /// false 表示只做了分组、还没算清晰度/人脸/评分（软加载）。
-    let isScored: Bool
-    /// 未评分时是分组顺序；评分后第一个是"建议留"。
+    /// 组内成员，按拍摄时间正序。
     let assets: [AnalyzedAsset]
 }
 

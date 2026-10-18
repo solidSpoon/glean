@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-@testable import GleanCore
+@testable import GrazeCore
 
 /// 离线标定：不碰相册，用合成图像量一下 FeaturePrint 在"同一张图被糊掉"这个最关键的
 /// 场景上到底给多少分。这不是靠猜的，断言只锁定方向性（模糊越重分数越低），具体数值
@@ -69,17 +69,6 @@ final class VisionSmokeTests: XCTestCase {
         restored.interpolationQuality = .high
         restored.draw(downscaled, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         return restored.makeImage() ?? image
-    }
-
-    func testSharpnessDetectsBlur() {
-        let sharp = scene(circles: layoutA)
-        let blurry = blurred(sharp, factor: 8)
-
-        let sharpValue = ImageQuality.sharpness(of: sharp)
-        let blurryValue = ImageQuality.sharpness(of: blurry)
-
-        XCTAssertGreaterThan(sharpValue, 0)
-        XCTAssertGreaterThan(sharpValue, blurryValue * 3, "模糊图的拉普拉斯方差应明显更低")
     }
 
     func testSimilarityCalibration() throws {

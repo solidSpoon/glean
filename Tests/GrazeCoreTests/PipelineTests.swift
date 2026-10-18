@@ -1,11 +1,11 @@
 import XCTest
-@testable import GleanCore
+@testable import GrazeCore
 
 final class SessionTests: XCTestCase {
     private let base = Date(timeIntervalSince1970: 1_700_000_000)
 
-    private func asset(_ id: String, offset: TimeInterval, burst: String? = nil) -> GleanAsset {
-        GleanAsset(
+    private func asset(_ id: String, offset: TimeInterval, burst: String? = nil) -> GrazeAsset {
+        GrazeAsset(
             id: id,
             pixelWidth: 100,
             pixelHeight: 100,
@@ -42,7 +42,7 @@ final class SessionTests: XCTestCase {
     /// 没有拍摄时间的资产不能互相粘在一起：时间提供不了任何约束。
     func testUndatedAssetsStayIsolated() {
         let undated = (0..<3).map { index in
-            GleanAsset(
+            GrazeAsset(
                 id: "u\(index)",
                 pixelWidth: 10,
                 pixelHeight: 10,
@@ -83,8 +83,8 @@ final class ThresholdPolicyTests: XCTestCase {
 final class GroupingTests: XCTestCase {
     private let base = Date(timeIntervalSince1970: 1_700_000_000)
 
-    private func asset(_ id: String, offset: TimeInterval, burst: String? = nil) -> GleanAsset {
-        GleanAsset(
+    private func asset(_ id: String, offset: TimeInterval, burst: String? = nil) -> GrazeAsset {
+        GrazeAsset(
             id: id,
             pixelWidth: 100,
             pixelHeight: 100,
@@ -172,8 +172,8 @@ final class GroupingTests: XCTestCase {
 
     // MARK: - 截图与照片分区
 
-    private func screenshot(_ id: String, offset: TimeInterval) -> GleanAsset {
-        GleanAsset(
+    private func screenshot(_ id: String, offset: TimeInterval) -> GrazeAsset {
+        GrazeAsset(
             id: id,
             pixelWidth: 1179,
             pixelHeight: 2556,
@@ -215,35 +215,5 @@ final class GroupingTests: XCTestCase {
 
         let shots = [screenshot("a", offset: 0), screenshot("b", offset: 3600)]
         XCTAssertEqual(Grouping.groups(assets: shots, prints: prints).count, 0)
-    }
-}
-
-final class KeeperRankerTests: XCTestCase {
-    func testSharpnessWinsWithoutFaces() {
-        let metrics = [
-            AssetMetrics(assetID: "sharp", sharpness: 500, faceQuality: nil, pixelCount: 12_000_000),
-            AssetMetrics(assetID: "blurry", sharpness: 40, faceQuality: nil, pixelCount: 12_000_000),
-        ]
-        let ranked = KeeperRanker.rank(metrics)
-        XCTAssertEqual(ranked.first?.assetID, "sharp")
-        XCTAssertGreaterThan(ranked[0].score, ranked[1].score)
-    }
-
-    /// 清晰度接近时，人脸质量应该压过清晰度——"糊一点但睁着眼"要赢。
-    func testFaceQualityBreaksTie() {
-        let metrics = [
-            AssetMetrics(assetID: "sharpClosedEyes", sharpness: 100, faceQuality: 0.2, pixelCount: 12_000_000),
-            AssetMetrics(assetID: "slightlyBlurredOpenEyes", sharpness: 95, faceQuality: 0.9, pixelCount: 12_000_000),
-        ]
-        let ranked = KeeperRanker.rank(metrics)
-        XCTAssertEqual(ranked.first?.assetID, "slightlyBlurredOpenEyes")
-    }
-
-    func testSingleItemIsTriviallyKept() {
-        let ranked = KeeperRanker.rank(
-            [AssetMetrics(assetID: "only", sharpness: 1, faceQuality: nil, pixelCount: 1)]
-        )
-        XCTAssertEqual(ranked.count, 1)
-        XCTAssertEqual(ranked[0].score, 1)
     }
 }

@@ -4,7 +4,7 @@ import Foundation
 
 /// 运行环境自检。
 ///
-/// `GleanApp` 是 SwiftPM 的 executable target。直接从 Xcode 选 `GleanApp` scheme 运行、
+/// `GrazeApp` 是 SwiftPM 的 executable target。直接从 Xcode 选 `GrazeApp` scheme 运行、
 /// 或者 `swift run`，得到的是一个没有 bundle 的裸二进制：没有 Info.plist、没有
 /// NSPhotoLibraryUsageDescription，PhotoKit 一碰就被系统杀，SwiftUI 也建不出窗口。
 ///
@@ -18,12 +18,12 @@ enum LaunchEnvironment {
         guard !isBundled else { return }
 
         let message = """
-        glean 必须从 .app bundle 里运行：裸可执行文件没有相册权限声明，窗口也建不出来。
+        graze 必须从 .app bundle 里运行：裸可执行文件没有相册权限声明，窗口也建不出来。
 
         正确姿势（任选其一）：
-          · 双击 build/Glean.app
+          · 双击 build/Graze.app
           · 终端跑 ./scripts/run.sh
-          · 在 Xcode 里打开 glean.xcodeproj，scheme 选 Glean（不是 GleanApp），再按 ⌘R
+          · 在 Xcode 里打开 graze.xcodeproj，scheme 选 Graze（不是 GrazeApp），再按 ⌘R
         """
 
         FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -37,7 +37,7 @@ enum LaunchEnvironment {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "glean 需要以 App 方式运行"
+            alert.messageText = "graze 需要以 App 方式运行"
             alert.informativeText = message
             alert.addButton(withTitle: "知道了")
             alert.runModal()

@@ -2,25 +2,25 @@
 import PackageDescription
 
 let package = Package(
-    name: "glean",
+    name: "graze",
     platforms: [.macOS("26.0")],
     products: [
-        .executable(name: "GleanApp", targets: ["GleanApp"]),
-        .library(name: "GleanCore", targets: ["GleanCore"]),
+        .executable(name: "GrazeApp", targets: ["GrazeApp"]),
+        .library(name: "GrazeCore", targets: ["GrazeCore"]),
     ],
     targets: [
         .target(
-            name: "GleanCore",
+            name: "GrazeCore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "GleanApp",
-            dependencies: ["GleanCore"],
+            name: "GrazeApp",
+            dependencies: ["GrazeCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
-            name: "GleanCoreTests",
-            dependencies: ["GleanCore"],
+            name: "GrazeCoreTests",
+            dependencies: ["GrazeCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
