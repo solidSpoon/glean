@@ -1,49 +1,17 @@
 import GleanCore
 import SwiftUI
 
-// MARK: - 组卡片
-
-struct GroupCardView: View {
-    let index: Int
+/// 右侧：选中那一组的照片。
+struct GroupDetailView: View {
     let group: AnalyzedGroup
     let onSelect: (Int) -> Void
 
-    private var subtitle: String {
-        var parts = [
-            "\(group.assets.count) 张",
-            String(format: "凝聚 %.3f", group.cohesion),
-            "跨度 " + Theme.duration(group.timeSpan),
-        ]
-        if !group.links.isEmpty {
-            parts.append(Theme.links(group.links))
-        }
-        return parts.joined(separator: " · ")
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 8) {
-                Text("第 \(index) 组")
-                    .font(.system(size: 13, weight: .semibold))
-
-                GlassTag(
-                    text: group.kind == .photo ? "照片" : "截图",
-                    systemImage: group.kind == .photo ? "photo" : "iphone",
-                    tint: group.kind == .screenshot ? Color.cyan.opacity(0.30) : nil
-                )
-
-                Text(subtitle)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-
-                Spacer(minLength: 0)
-            }
-
+        ScrollView {
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: Theme.cellSide), spacing: 12)],
+                columns: [GridItem(.adaptive(minimum: Theme.cellSide), spacing: 16)],
                 alignment: .leading,
-                spacing: 12
+                spacing: 18
             ) {
                 ForEach(Array(group.assets.enumerated()), id: \.element.id) { offset, asset in
                     AssetCell(asset: asset, isKeeper: offset == 0) {
@@ -51,20 +19,11 @@ struct GroupCardView: View {
                     }
                 }
             }
+            .padding(20)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardCorner)
-                .fill(.white.opacity(0.045))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cardCorner)
-                .strokeBorder(.white.opacity(0.07), lineWidth: 1)
-        )
+        .background(.background)
     }
 }
-
-// MARK: - 单元格
 
 struct AssetCell: View {
     let asset: AnalyzedAsset
@@ -77,14 +36,14 @@ struct AssetCell: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 4) {
                 ZStack(alignment: .topLeading) {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(.white.opacity(0.06))
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(.quaternary)
 
                     if let image {
                         Image(decorative: image, scale: 1)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .padding(3)
+                            .padding(2)
                     } else {
                         ProgressView()
                             .controlSize(.small)
@@ -93,7 +52,7 @@ struct AssetCell: View {
 
                     if isKeeper {
                         Text("留")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -102,24 +61,23 @@ struct AssetCell: View {
                     }
                 }
                 .frame(width: Theme.cellSide, height: Theme.cellSide)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(
-                            isKeeper ? Color.accentColor : Color.white.opacity(0.10),
-                            lineWidth: isKeeper ? 2.5 : 1
+                            isKeeper ? Color.accentColor : Color.clear,
+                            lineWidth: 2
                         )
                 )
-                .shadow(color: isKeeper ? Color.accentColor.opacity(0.35) : .clear, radius: 9)
 
                 Text(asset.name)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(isKeeper ? .primary : .secondary)
 
                 Text(detail)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: 10))
                     .lineLimit(1)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
@@ -129,17 +87,16 @@ struct AssetCell: View {
         .buttonStyle(.plain)
         .help("\(asset.name)\n\(asset.pixelWidth)×\(asset.pixelHeight)\n\(asset.reason)")
         .task(id: asset.id) {
-            image = await ThumbnailCache.shared.image(for: asset.id, target: 256)
+            image = await ThumbnailCache.shared.image(for: asset.id, target: 320)
         }
     }
 
-    /// 清晰度保留两位小数。原来用 %.0f，真实量级 0.2–3 被印成 "0"/"1"，看起来像坏了。
     private var detail: String {
         String(format: "%.2f · 清晰 %.2f", asset.score, asset.sharpness)
     }
 }
 
-// MARK: - 全屏预览
+// MARK: - 预览
 
 struct PreviewOverlay: View {
     @Binding var state: PreviewState?
@@ -151,27 +108,45 @@ struct PreviewOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.88)
+            Color.black.opacity(0.9)
                 .ignoresSafeArea()
-                .onTapGesture { state = nil }
 
             if let asset {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-
+                VStack(spacing: 12) {
                     if let image {
                         Image(decorative: image, scale: 1)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .padding(26)
+                            .padding(24)
                     } else {
                         ProgressView()
                             .controlSize(.large)
                     }
 
-                    Spacer(minLength: 0)
-                    controls(for: asset)
-                        .padding(.bottom, 18)
+                    HStack(spacing: 14) {
+                        Button {
+                            _ = step(-1)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                        }
+                        .disabled((state?.index ?? 0) <= 0)
+
+                        Text("\(asset.name)　\((state?.index ?? 0) + 1)/\(state?.group.assets.count ?? 0)")
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+
+                        Button {
+                            _ = step(1)
+                        } label: {
+                            Image(systemName: "chevron.right")
+                        }
+                        .disabled((state?.index ?? 0) >= (state?.group.assets.count ?? 1) - 1)
+
+                        Button("关闭") { state = nil }
+                            .keyboardShortcut(.cancelAction)
+                    }
+                    .controlSize(.large)
+                    .padding(.bottom, 20)
                 }
             }
         }
@@ -191,46 +166,8 @@ struct PreviewOverlay: View {
         }
     }
 
-    private func controls(for asset: AnalyzedAsset) -> some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                Button {
-                    _ = step(-1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(.glass)
-                .disabled((state?.index ?? 0) <= 0)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(asset.name)　\((state?.index ?? 0) + 1)/\(state?.group.assets.count ?? 0)")
-                        .font(.system(size: 11, design: .monospaced))
-                    Text("\(asset.pixelWidth)×\(asset.pixelHeight) · \(asset.reason)")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .glassEffect(.regular, in: .capsule)
-
-                Button {
-                    _ = step(1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .buttonStyle(.glass)
-                .disabled((state?.index ?? 0) >= (state?.group.assets.count ?? 1) - 1)
-
-                Button("关闭") { state = nil }
-                    .buttonStyle(.glassProminent)
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-    }
-
     private func step(_ delta: Int) -> KeyPress.Result {
-        guard let current = state, let asset = current.asset else { return .ignored }
-        _ = asset
+        guard let current = state else { return .ignored }
         let next = current.index + delta
         guard current.group.assets.indices.contains(next) else { return .handled }
         state = PreviewState(group: current.group, index: next)
