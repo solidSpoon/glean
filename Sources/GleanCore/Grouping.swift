@@ -104,6 +104,8 @@ public enum Grouping {
         /// 组内最小两两相似度。这是"这组有多可信"的最直接度量。
         public let cohesion: Float
         public let timeSpan: TimeInterval
+        /// 组内最新的拍摄时间。列表按它倒序——找图通常也是按"最近"找的。
+        public let latestDate: Date?
         public let links: Set<Link>
 
         public var size: Int { assetIDs.count }
@@ -142,9 +144,12 @@ public enum Grouping {
             maxGap: maxGap
         )
 
-        // 照片组排在截图组前面，各自按可信度降序
+        // 照片组与截图组各自聚完之后合在一起，按组内最新时间倒序；
+        // 时间相同的再按可信度排。
         return (photos + screenshots).sorted { lhs, rhs in
-            if lhs.kind != rhs.kind { return lhs.kind == .photo }
+            let left = lhs.latestDate ?? .distantPast
+            let right = rhs.latestDate ?? .distantPast
+            if left != right { return left > right }
             if abs(lhs.cohesion - rhs.cohesion) > 0.001 { return lhs.cohesion > rhs.cohesion }
             return lhs.size > rhs.size
         }
@@ -224,6 +229,7 @@ public enum Grouping {
                     assetIDs: pruned.map { valid[$0].id },
                     cohesion: minPairwiseSimilarity(pruned, vectors: vectors, valid: valid),
                     timeSpan: span,
+                    latestDate: dates.max(),
                     links: links(for: pruned, assets: valid, vectors: vectors, policy: policy, sessionOfAsset: sessionOfAsset)
                 )
             )

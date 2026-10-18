@@ -487,7 +487,8 @@ struct GroupCard: View {
     }
 
     private var detailLine: String {
-        var parts = ["跨度 " + Theme.duration(group.timeSpan)]
+        // 列表按“组内最新时间”倒序，所以卡片上把时间摆出来，否则排序依据看不见
+        var parts = [Theme.shortDate(group.latestDate)]
         if !group.links.isEmpty {
             parts.append(Theme.links(group.links))
         }
@@ -526,7 +527,7 @@ struct GroupCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture { action() }
-        .help("第 \(group.id + 1) 组 · \(group.assets.count) 张")
+        .help("第 \(group.id + 1) 组 · \(group.assets.count) 张 · 凝聚度 \(String(format: "%.3f", group.cohesion)) · 跨度 \(Theme.duration(group.timeSpan))")
         .task(id: stripIDs.joined(separator: ",")) {
             var loaded: [String: CGImage] = [:]
             for id in stripIDs {

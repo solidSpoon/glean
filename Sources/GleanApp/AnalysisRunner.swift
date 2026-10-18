@@ -254,6 +254,7 @@ final class AnalysisRunner: ObservableObject {
             kind: base.kind,
             cohesion: base.cohesion,
             timeSpan: base.timeSpan,
+            latestDate: base.latestDate,
             links: base.links,
             isScored: true,
             assets: assets
@@ -293,6 +294,7 @@ final class AnalysisRunner: ObservableObject {
             kind: group.kind,
             cohesion: group.cohesion,
             timeSpan: group.timeSpan,
+            latestDate: group.latestDate,
             links: group.links,
             isScored: false,
             assets: assets

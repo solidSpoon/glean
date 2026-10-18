@@ -51,6 +51,8 @@ struct AnalyzedGroup: Identifiable {
     let kind: Grouping.Kind
     let cohesion: Float
     let timeSpan: TimeInterval
+    /// 组内最新拍摄时间，列表排序依据。
+    let latestDate: Date?
     let links: Set<Grouping.Link>
     /// false 表示只做了分组、还没算清晰度/人脸/评分（软加载）。
     let isScored: Bool
