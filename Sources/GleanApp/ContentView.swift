@@ -35,6 +35,12 @@ enum AnalysisRange: String, CaseIterable, Identifiable {
     }
 }
 
+/// 当前键盘焦点在哪一栏。左右两栏各自处理方向键，不再抢。
+private enum PaneFocus: Hashable {
+    case groups
+    case photos
+}
+
 struct ContentView: View {
     @State private var status: PHAuthorizationStatus = PhotoAccess.current
     @State private var assets: [GleanAsset] = []
@@ -43,29 +49,40 @@ struct ContentView: View {
     @State private var range: AnalysisRange = .month3
     @State private var rangeCounts: [AnalysisRange: Int] = [:]
     @State private var selection: Int?
+    @State private var selectedAssetID: String?
     @State private var preview: PreviewState?
     @StateObject private var runner = AnalysisRunner()
 
-    @FocusState private var gridFocused: Bool
+    @FocusState private var focus: PaneFocus?
 
     /// 左栏固定两列，键盘上下跳一行就是 ±2。
     private let columnCount = 2
 
     private var selectedGroup: AnalyzedGroup? {
         guard let selection else { return nil }
-        return runner.groups.first { $0.id == selection }
+        return runner.group(selection)
+    }
+
+    private var selectedAsset: AnalyzedAsset? {
+        guard let selectedAssetID else { return nil }
+        return selectedGroup?.assets.first { $0.id == selectedAssetID }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 groupPane
-                    .frame(minWidth: 340, idealWidth: 460, maxWidth: 640)
+                    .frame(minWidth: 320, idealWidth: 420, maxWidth: 600)
 
                 Divider()
 
-                detailPane
-                    .frame(minWidth: 420, maxWidth: .infinity)
+                photoPane
+                    .frame(minWidth: 340, maxWidth: .infinity)
+
+                Divider()
+
+                infoPane
+                    .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
             }
 
             Divider()
@@ -75,10 +92,24 @@ struct ContentView: View {
         .navigationTitle(selectedGroup.map { "第 \($0.id + 1) 组" } ?? "glean")
         .navigationSubtitle(selectedGroup.map(subtitle) ?? "")
         .toolbar { toolbar }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1040, minHeight: 600)
+        .task(id: selection) {
+            guard let id = selection else {
+                selectedAssetID = nil
+                return
+            }
+            await runner.ensureScored(id)
+            if let group = runner.group(id) {
+                if selectedAssetID == nil || group.assets.first(where: { $0.id == selectedAssetID }) == nil {
+                    selectedAssetID = group.assets.first?.id
+                }
+            }
+        }
         .overlay {
             if preview != nil {
-                PreviewOverlay(state: $preview)
+                PreviewOverlay(state: $preview) { id in
+                    selectedAssetID = id
+                }
             }
         }
     }
@@ -109,7 +140,8 @@ struct ContentView: View {
                     ForEach(runner.groups) { group in
                         GroupCard(group: group, isSelected: group.id == selection) {
                             selection = group.id
-                            gridFocused = true
+                            selectedAssetID = nil
+                            focus = .groups
                         }
                     }
                 }
@@ -130,44 +162,60 @@ struct ContentView: View {
             }
         }
         .focusable()
-        .focused($gridFocused)
+        .focused($focus, equals: .groups)
         .focusEffectDisabled()
-        .onAppear { gridFocused = true }
-        .onKeyPress(.leftArrow) { move(-1) }
-        .onKeyPress(.rightArrow) { move(1) }
-        .onKeyPress(.upArrow) { move(-columnCount) }
-        .onKeyPress(.downArrow) { move(columnCount) }
-        .onKeyPress(.space) { openSelected() }
-        .onKeyPress(.return) { openSelected() }
+        .onAppear {
+            if focus == nil { focus = .groups }
+        }
+        .onKeyPress(.leftArrow) { moveGroup(-1) }
+        .onKeyPress(.rightArrow) { moveGroup(1) }
+        .onKeyPress(.upArrow) { moveGroup(-columnCount) }
+        .onKeyPress(.downArrow) { moveGroup(columnCount) }
     }
 
-    /// 键盘移动选中项。左右走一格，上下跳一行。
-    private func move(_ delta: Int) -> KeyPress.Result {
+    private func moveGroup(_ delta: Int) -> KeyPress.Result {
         guard !runner.groups.isEmpty else { return .ignored }
         guard let current = selection,
               let index = runner.groups.firstIndex(where: { $0.id == current }) else {
             selection = runner.groups.first?.id
+            selectedAssetID = nil
             return .handled
         }
         let next = index + delta
         guard runner.groups.indices.contains(next) else { return .handled }
         selection = runner.groups[next].id
+        selectedAssetID = nil
         return .handled
     }
 
-    private func openSelected() -> KeyPress.Result {
-        guard let group = selectedGroup else { return .ignored }
-        preview = PreviewState(group: group, index: 0)
-        return .handled
-    }
-
-    // MARK: - 右：选中组的照片
+    // MARK: - 中：这一组的照片
 
     @ViewBuilder
-    private var detailPane: some View {
+    private var photoPane: some View {
         if let group = selectedGroup {
-            GroupDetailView(group: group) { index in
-                preview = PreviewState(group: group, index: index)
+            if group.isScored {
+                GroupDetailView(
+                    group: group,
+                    selectedID: selectedAssetID,
+                    onSelect: { id in
+                        selectedAssetID = id
+                        focus = .photos
+                    },
+                    onOpen: { index in
+                        selectedAssetID = group.assets[index].id
+                        preview = PreviewState(group: group, index: index)
+                    }
+                )
+                .focusable()
+                .focused($focus, equals: .photos)
+                .focusEffectDisabled()
+                .onKeyPress(.leftArrow) { movePhoto(-1) }
+                .onKeyPress(.rightArrow) { movePhoto(1) }
+                .onKeyPress(.space) { openSelectedPhoto() }
+                .onKeyPress(.return) { openSelectedPhoto() }
+            } else {
+                ProgressView("正在计算清晰度…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
             ContentUnavailableView(
@@ -179,6 +227,42 @@ struct ContentView: View {
                         : "左侧每张卡片是一个相似组，点开看这一组里的照片"
                 )
             )
+        }
+    }
+
+    private func movePhoto(_ delta: Int) -> KeyPress.Result {
+        guard let group = selectedGroup, group.isScored, !group.assets.isEmpty else { return .ignored }
+        guard let current = selectedAssetID,
+              let index = group.assets.firstIndex(where: { $0.id == current }) else {
+            selectedAssetID = group.assets.first?.id
+            return .handled
+        }
+        let next = index + delta
+        guard group.assets.indices.contains(next) else { return .handled }
+        selectedAssetID = group.assets[next].id
+        return .handled
+    }
+
+    private func openSelectedPhoto() -> KeyPress.Result {
+        guard let group = selectedGroup, group.isScored, let id = selectedAssetID,
+              let index = group.assets.firstIndex(where: { $0.id == id }) else { return .ignored }
+        preview = PreviewState(group: group, index: index)
+        return .handled
+    }
+
+    // MARK: - 右：照片信息
+
+    private var infoPane: some View {
+        Group {
+            if let asset = selectedAsset, let group = selectedGroup {
+                AssetInfoView(asset: asset, group: group)
+            } else {
+                ContentUnavailableView(
+                    "未选择照片",
+                    systemImage: "info.circle",
+                    description: Text("在中间选一张照片，这里显示它的详细信息")
+                )
+            }
         }
     }
 
@@ -312,7 +396,8 @@ struct ContentView: View {
         Task {
             await runner.run(assets: scope)
             selection = runner.groups.first?.id
-            gridFocused = true
+            selectedAssetID = nil
+            focus = .groups
         }
     }
 }

@@ -2,7 +2,7 @@ import GleanCore
 import SwiftUI
 
 enum Theme {
-    static let cellSide: CGFloat = 220
+    static let cellSide: CGFloat = 168
     static let sidebarThumb: CGFloat = 52
 
     static func duration(_ interval: TimeInterval) -> String {
