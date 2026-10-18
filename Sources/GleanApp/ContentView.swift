@@ -224,7 +224,7 @@ struct ContentView: View {
         .onKeyPress(.leftArrow) { movePhoto(-1) }
         .onKeyPress(.rightArrow) { movePhoto(1) }
         .onKeyPress(.space) { openFocusedPhoto() }
-        .onKeyPress(.return) { openFocusedPhoto() }
+        .onKeyPress(.return) { toggleSelectionMark() }
     }
 
     private func select(_ id: String, additive: Bool) {
@@ -346,19 +346,16 @@ struct ContentView: View {
         if !selectedIDs.isEmpty {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    markSelection(true)
+                    toggleSelectionMark()
                 } label: {
-                    Label("标记待删除", systemImage: "trash")
+                    Label(
+                        allSelectedMarked ? "取消待删除" : "标记待删除",
+                        systemImage: allSelectedMarked ? "trash.slash" : "trash"
+                    )
                 }
-                .help("把选中的 \(selectedIDs.count) 张加进「\(DeletionAlbum.title)」相册")
-
-                if !selectedIDs.isDisjoint(with: marks.marked) {
-                    Button {
-                        markSelection(false)
-                    } label: {
-                        Label("取消标记", systemImage: "trash.slash")
-                    }
-                }
+                .help(allSelectedMarked
+                    ? "把选中的 \(selectedIDs.count) 张移出「\(DeletionAlbum.title)」"
+                    : "把选中的 \(selectedIDs.count) 张加进「\(DeletionAlbum.title)」")
             }
         }
 
@@ -368,13 +365,6 @@ struct ContentView: View {
                     Task { status = await PhotoAccess.request() }
                 }
             } else if status == .authorized || status == .limited {
-                Button {
-                    openPhotos()
-                } label: {
-                    Label("在照片中查看", systemImage: "photo")
-                }
-                .help("打开照片 App，到「\(DeletionAlbum.title)」相册里全选删除")
-
                 Picker("范围", selection: $range) {
                     ForEach(AnalysisRange.allCases) { option in
                         Text("\(option.title)（\(rangeCounts[option] ?? 0)）")
@@ -426,6 +416,17 @@ struct ContentView: View {
 
     // MARK: - 动作
 
+    private var allSelectedMarked: Bool {
+        !selectedIDs.isEmpty && selectedIDs.isSubset(of: marks.marked)
+    }
+
+    /// 回车：选中项批量切换待删除标记（全已标记 → 取消，否则 → 标记）。
+    private func toggleSelectionMark() -> KeyPress.Result {
+        guard !selectedIDs.isEmpty else { return .ignored }
+        markSelection(!allSelectedMarked)
+        return .handled
+    }
+
     private func markSelection(_ value: Bool) {
         let ids = Array(selectedIDs)
         Task { await marks.setMarked(ids, value) }
@@ -433,11 +434,6 @@ struct ContentView: View {
 
     private func toggleMark(_ id: String) {
         Task { await marks.toggle(id) }
-    }
-
-    private func openPhotos() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Photos") else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     private func scan() {
