@@ -5,6 +5,7 @@ import GleanCore
 @MainActor
 final class AnalysisRunner: ObservableObject {
     @Published private(set) var running = false
+    @Published private(set) var phase = ""
     @Published private(set) var progressLabel = ""
     @Published private(set) var progressValue: Double = 0
     @Published private(set) var groups: [AnalyzedGroup] = []
@@ -14,11 +15,12 @@ final class AnalysisRunner: ObservableObject {
     let logPath = GleanLog.shared.textURL.path
     private let log = GleanLog.shared
 
-    func run(assets: [GleanAsset], limit: Int = 300) async {
+    func run(assets: [GleanAsset]) async {
         guard !running else { return }
         running = true
         defer {
             running = false
+            phase = ""
             progressLabel = ""
             progressValue = 0
         }
@@ -30,10 +32,10 @@ final class AnalysisRunner: ObservableObject {
         let startedAt = Date()
         let bursts = assets.filter { $0.burstID != nil }.count
         let screenshots = assets.filter(\.isScreenshot).count
-        log.begin("run \(ISO8601DateFormatter().string(from: startedAt)) limit=\(limit) library=\(assets.count)")
+        log.begin("run \(ISO8601DateFormatter().string(from: startedAt)) library=\(assets.count)")
 
-        let sample = Array(assets.prefix(limit))
-        note("样本：最近 \(sample.count) 张（全库 \(assets.count) 张 · 连拍 \(bursts) · 截图 \(screenshots)）")
+        let sample = assets
+        note("样本：\(sample.count) 张（连拍 \(bursts) · 截图 \(screenshots)）")
         log.info("scan", [
             "assets": assets.count,
             "sample": sample.count,
@@ -42,6 +44,8 @@ final class AnalysisRunner: ObservableObject {
         ])
 
         let featureStarted = Date()
+        phase = "计算特征"
+        progressValue = 0
         let prints = await featurePrints(for: sample)
         let featureSeconds = Date().timeIntervalSince(featureStarted)
         note("特征：\(prints.count)/\(sample.count) 张，\(String(format: "%.1fs", featureSeconds))")
@@ -72,6 +76,8 @@ final class AnalysisRunner: ObservableObject {
         ])
 
         let groupingStarted = Date()
+        phase = "分组"
+        progressValue = 0.7
         let raw = Grouping.groups(assets: analyzed, prints: prints)
         let photoGroups = raw.filter { $0.kind == .photo }.count
         let shotGroups = raw.filter { $0.kind == .screenshot }.count
@@ -89,9 +95,10 @@ final class AnalysisRunner: ObservableObject {
         }
 
         var built: [AnalyzedGroup] = []
+        phase = "评分"
         for (index, group) in raw.enumerated() {
-            progressLabel = "评分 \(index + 1)/\(raw.count)"
-            progressValue = 0.7 + 0.3 * Double(index) / Double(raw.count)
+            progressLabel = "\(index + 1)/\(raw.count) 组"
+            progressValue = 0.75 + 0.25 * Double(index) / Double(raw.count)
             built.append(await analyze(group: group, index: index, byID: byID))
         }
 
@@ -210,7 +217,7 @@ final class AnalysisRunner: ObservableObject {
 
             for (id, vector) in partial { result[id] = vector }
             index = upper
-            progressLabel = "特征 \(result.count)/\(assets.count)"
+            progressLabel = "\(result.count)/\(assets.count)"
             progressValue = 0.7 * Double(result.count) / Double(max(assets.count, 1))
         }
         return result

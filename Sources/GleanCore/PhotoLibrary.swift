@@ -17,7 +17,8 @@ public enum PhotoAccess {
 
 public enum LibraryScanner {
     /// 抓取所有图片资产（含连拍、截图），跳过已隐藏的。
-    public static func loadAssets() -> [GleanAsset] {
+    /// `onProgress` 在枚举过程中回调 (已处理, 总数)，用于显示导入进度。
+    public static func loadAssets(onProgress: ((Int, Int) -> Void)? = nil) -> [GleanAsset] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         // 关键：默认只返回连拍组的 key photo，其余 19 张完全不出现。
@@ -27,7 +28,7 @@ public enum LibraryScanner {
 
         var out: [GleanAsset] = []
         out.reserveCapacity(result.count)
-        result.enumerateObjects { asset, _, _ in
+        result.enumerateObjects { asset, index, _ in
             let resources = PHAssetResource.assetResources(for: asset)
             let original = resources.first { $0.type == .photo }?.originalFilename
             out.append(
@@ -43,6 +44,10 @@ public enum LibraryScanner {
                     modificationDate: asset.modificationDate
                 )
             )
+            // 每 200 张报一次，别把 UI 线程刷满
+            if index % 200 == 0 || index == result.count - 1 {
+                onProgress?(index + 1, result.count)
+            }
         }
         return out.filter { !$0.isHidden }
     }
