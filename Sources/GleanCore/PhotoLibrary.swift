@@ -31,6 +31,7 @@ public enum LibraryScanner {
         result.enumerateObjects { asset, index, _ in
             let resources = PHAssetResource.assetResources(for: asset)
             let original = resources.first { $0.type == .photo }?.originalFilename
+            let subtypes = asset.mediaSubtypes
             out.append(
                 GleanAsset(
                     id: asset.localIdentifier,
@@ -38,10 +39,17 @@ public enum LibraryScanner {
                     pixelHeight: asset.pixelHeight,
                     creationDate: asset.creationDate,
                     burstID: asset.burstIdentifier,
-                    isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot),
+                    isScreenshot: subtypes.contains(.photoScreenshot),
                     isHidden: asset.isHidden,
                     originalFilename: original,
-                    modificationDate: asset.modificationDate
+                    modificationDate: asset.modificationDate,
+                    isFavorite: asset.isFavorite,
+                    isLivePhoto: subtypes.contains(.photoLive),
+                    isPanorama: subtypes.contains(.photoPanorama),
+                    isHDR: subtypes.contains(.photoHDR),
+                    isDepthEffect: subtypes.contains(.photoDepthEffect),
+                    latitude: asset.location?.coordinate.latitude,
+                    longitude: asset.location?.coordinate.longitude
                 )
             )
             // 每 200 张报一次，别把 UI 线程刷满

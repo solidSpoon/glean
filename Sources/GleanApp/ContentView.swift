@@ -35,12 +35,6 @@ enum AnalysisRange: String, CaseIterable, Identifiable {
     }
 }
 
-/// 当前键盘焦点在哪一栏。左右两栏各自处理方向键，不再抢。
-private enum PaneFocus: Hashable {
-    case groups
-    case photos
-}
-
 struct ContentView: View {
     @State private var status: PHAuthorizationStatus = PhotoAccess.current
     @State private var assets: [GleanAsset] = []
@@ -53,9 +47,10 @@ struct ContentView: View {
     @State private var preview: PreviewState?
     @StateObject private var runner = AnalysisRunner()
 
-    @FocusState private var focus: PaneFocus?
+    /// 键盘导航只在中间一栏生效。左栏纯鼠标点击。
+    @FocusState private var photoFocused: Bool
 
-    /// 左栏固定两列，键盘上下跳一行就是 ±2。
+    /// 左栏固定两列。
     private let columnCount = 2
 
     private var selectedGroup: AnalyzedGroup? {
@@ -112,9 +107,13 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: preview == nil) { _, closed in
+            // 空格关掉预览后，焦点回到中间栏，可以继续用方向键
+            if closed { photoFocused = true }
+        }
     }
 
-    // MARK: - 左：组卡片网格
+    // MARK: - 左：组卡片网格（只用鼠标）
 
     private var groupPane: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -141,7 +140,8 @@ struct ContentView: View {
                         GroupCard(group: group, isSelected: group.id == selection) {
                             selection = group.id
                             selectedAssetID = nil
-                            focus = .groups
+                            // 左栏不做键盘导航；点了组就把焦点交给中间栏，方向键立刻可用
+                            photoFocused = true
                         }
                     }
                 }
@@ -161,73 +161,50 @@ struct ContentView: View {
                 }
             }
         }
-        .focusable()
-        .focused($focus, equals: .groups)
-        .focusEffectDisabled()
-        .onAppear {
-            if focus == nil { focus = .groups }
-        }
-        .onKeyPress(.leftArrow) { moveGroup(-1) }
-        .onKeyPress(.rightArrow) { moveGroup(1) }
-        .onKeyPress(.upArrow) { moveGroup(-columnCount) }
-        .onKeyPress(.downArrow) { moveGroup(columnCount) }
     }
 
-    private func moveGroup(_ delta: Int) -> KeyPress.Result {
-        guard !runner.groups.isEmpty else { return .ignored }
-        guard let current = selection,
-              let index = runner.groups.firstIndex(where: { $0.id == current }) else {
-            selection = runner.groups.first?.id
-            selectedAssetID = nil
-            return .handled
-        }
-        let next = index + delta
-        guard runner.groups.indices.contains(next) else { return .handled }
-        selection = runner.groups[next].id
-        selectedAssetID = nil
-        return .handled
-    }
+    // MARK: - 中：这一组的照片（键盘导航在这里）
 
-    // MARK: - 中：这一组的照片
-
-    @ViewBuilder
     private var photoPane: some View {
-        if let group = selectedGroup {
-            if group.isScored {
-                GroupDetailView(
-                    group: group,
-                    selectedID: selectedAssetID,
-                    onSelect: { id in
-                        selectedAssetID = id
-                        focus = .photos
-                    },
-                    onOpen: { index in
-                        selectedAssetID = group.assets[index].id
-                        preview = PreviewState(group: group, index: index)
-                    }
-                )
-                .focusable()
-                .focused($focus, equals: .photos)
-                .focusEffectDisabled()
-                .onKeyPress(.leftArrow) { movePhoto(-1) }
-                .onKeyPress(.rightArrow) { movePhoto(1) }
-                .onKeyPress(.space) { openSelectedPhoto() }
-                .onKeyPress(.return) { openSelectedPhoto() }
+        Group {
+            if let group = selectedGroup {
+                if group.isScored {
+                    GroupDetailView(
+                        group: group,
+                        selectedID: selectedAssetID,
+                        onSelect: { id in
+                            selectedAssetID = id
+                            photoFocused = true
+                        },
+                        onOpen: { index in
+                            selectedAssetID = group.assets[index].id
+                            preview = PreviewState(group: group, index: index)
+                        }
+                    )
+                } else {
+                    ProgressView("正在计算清晰度…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
-                ProgressView("正在计算清晰度…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        } else {
-            ContentUnavailableView(
-                runner.groups.isEmpty ? "还没有相似组" : "选择一个组",
-                systemImage: "photo.on.rectangle.angled",
-                description: Text(
-                    runner.groups.isEmpty
-                        ? "点右上角「分析」开始查找"
-                        : "左侧每张卡片是一个相似组，点开看这一组里的照片"
+                ContentUnavailableView(
+                    runner.groups.isEmpty ? "还没有相似组" : "选择一个组",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text(
+                        runner.groups.isEmpty
+                            ? "点右上角「分析」开始查找"
+                            : "左侧每张卡片是一个相似组，点开看这一组里的照片"
+                    )
                 )
-            )
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .focusable()
+        .focused($photoFocused)
+        .focusEffectDisabled()
+        .onKeyPress(.leftArrow) { movePhoto(-1) }
+        .onKeyPress(.rightArrow) { movePhoto(1) }
+        .onKeyPress(.space) { openSelectedPhoto() }
+        .onKeyPress(.return) { openSelectedPhoto() }
     }
 
     private func movePhoto(_ delta: Int) -> KeyPress.Result {
@@ -397,7 +374,7 @@ struct ContentView: View {
             await runner.run(assets: scope)
             selection = runner.groups.first?.id
             selectedAssetID = nil
-            focus = .groups
+            photoFocused = true
         }
     }
 }

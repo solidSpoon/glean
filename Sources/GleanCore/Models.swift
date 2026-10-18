@@ -17,6 +17,13 @@ public struct GleanAsset: Sendable, Identifiable, Hashable {
     public let originalFilename: String?
     /// 最近一次修改时间，增量扫描用。
     public let modificationDate: Date?
+    public let isFavorite: Bool
+    public let isLivePhoto: Bool
+    public let isPanorama: Bool
+    public let isHDR: Bool
+    public let isDepthEffect: Bool
+    public let latitude: Double?
+    public let longitude: Double?
 
     public init(
         id: String,
@@ -27,7 +34,14 @@ public struct GleanAsset: Sendable, Identifiable, Hashable {
         isScreenshot: Bool,
         isHidden: Bool,
         originalFilename: String?,
-        modificationDate: Date?
+        modificationDate: Date?,
+        isFavorite: Bool = false,
+        isLivePhoto: Bool = false,
+        isPanorama: Bool = false,
+        isHDR: Bool = false,
+        isDepthEffect: Bool = false,
+        latitude: Double? = nil,
+        longitude: Double? = nil
     ) {
         self.id = id
         self.pixelWidth = pixelWidth
@@ -38,6 +52,13 @@ public struct GleanAsset: Sendable, Identifiable, Hashable {
         self.isHidden = isHidden
         self.originalFilename = originalFilename
         self.modificationDate = modificationDate
+        self.isFavorite = isFavorite
+        self.isLivePhoto = isLivePhoto
+        self.isPanorama = isPanorama
+        self.isHDR = isHDR
+        self.isDepthEffect = isDepthEffect
+        self.latitude = latitude
+        self.longitude = longitude
     }
 
     public var pixelCount: Int { pixelWidth * pixelHeight }

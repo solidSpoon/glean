@@ -115,36 +115,52 @@ struct AssetInfoView: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(2)
                     .textSelection(.enabled)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 8)
 
                 if group.isScored {
                     Text(asset.reason)
                         .font(.system(size: 11))
                         .foregroundStyle(asset.score >= 0.999 ? Color.accentColor : .secondary)
-                        .padding(.bottom, 10)
+                        .padding(.bottom, 6)
                 }
 
                 section("文件")
                 row("类型", asset.fileExtension)
                 row("尺寸", "\(asset.pixelWidth) × \(asset.pixelHeight)")
                 row("像素", pixelText)
-                row("拍摄", asset.creationDate.map { Self.dateFormatter.string(from: $0) } ?? "—")
-                row("属性", attributes)
+                row("拍摄", format(asset.creationDate))
+                if let modified = asset.modificationDate, modified != asset.creationDate {
+                    row("修改", format(modified))
+                }
 
+                section("属性")
+                let labels = asset.attributeLabels
+                if labels.isEmpty {
+                    row("类型", "普通照片")
+                } else {
+                    ForEach(labels, id: \.self) { label in
+                        row("·", label)
+                    }
+                }
+
+                if let latitude = asset.latitude, let longitude = asset.longitude {
+                    section("位置")
+                    row("坐标", String(format: "%.5f, %.5f", latitude, longitude))
+                }
+
+                section("评分")
                 if group.isScored {
-                    section("评分")
                     row("组内得分", String(format: "%.2f", asset.score))
                     row("与保留张", asset.similarityToKeeper.map { String(format: "%.3f", $0) } ?? "—")
                     row("清晰度", String(format: "%.3f", asset.sharpness))
                     row("人脸质量", asset.faceQuality.map { String(format: "%.2f", $0) } ?? "—")
                 } else {
-                    section("评分")
                     Text("正在计算…")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
 
-                section("组")
+                section("所属组")
                 row("组号", "第 \(group.id + 1) 组")
                 row("类型", group.kind == .photo ? "照片" : "截图")
                 row("张数", "\(group.assets.count)")
@@ -168,11 +184,9 @@ struct AssetInfoView: View {
         return "\(count / 1000) K"
     }
 
-    private var attributes: String {
-        var parts: [String] = []
-        if asset.isScreenshot { parts.append("截图") }
-        if asset.hasBurst { parts.append("连拍") }
-        return parts.isEmpty ? "普通照片" : parts.joined(separator: " · ")
+    private func format(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        return Self.dateFormatter.string(from: date)
     }
 
     private func section(_ title: String) -> some View {
@@ -265,6 +279,10 @@ struct PreviewOverlay: View {
         }
         .onKeyPress(.leftArrow) { step(-1) }
         .onKeyPress(.rightArrow) { step(1) }
+        .onKeyPress(.space) {
+            state = nil
+            return .handled
+        }
         .onKeyPress(.escape) {
             state = nil
             return .handled

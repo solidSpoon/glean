@@ -7,8 +7,16 @@ struct AnalyzedAsset: Identifiable {
     let pixelWidth: Int
     let pixelHeight: Int
     let creationDate: Date?
+    let modificationDate: Date?
     let isScreenshot: Bool
     let hasBurst: Bool
+    let isFavorite: Bool
+    let isLivePhoto: Bool
+    let isPanorama: Bool
+    let isHDR: Bool
+    let isDepthEffect: Bool
+    let latitude: Double?
+    let longitude: Double?
     /// 拉普拉斯方差（曝光归一化后）。数值本身没有绝对意义，只在组内横向比较。
     let sharpness: Float
     let faceQuality: Float?
@@ -23,6 +31,19 @@ struct AnalyzedAsset: Identifiable {
     }
 
     var pixelCount: Int { pixelWidth * pixelHeight }
+
+    /// 属性线。"普通照片" 作为空集合的回退。
+    var attributeLabels: [String] {
+        var parts: [String] = []
+        if isFavorite { parts.append("收藏") }
+        if isScreenshot { parts.append("截图") }
+        if hasBurst { parts.append("连拍") }
+        if isLivePhoto { parts.append("实况") }
+        if isPanorama { parts.append("全景") }
+        if isHDR { parts.append("HDR") }
+        if isDepthEffect { parts.append("景深") }
+        return parts
+    }
 }
 
 struct AnalyzedGroup: Identifiable {
