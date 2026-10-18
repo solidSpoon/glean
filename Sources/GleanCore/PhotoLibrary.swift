@@ -20,6 +20,9 @@ public enum LibraryScanner {
     public static func loadAssets() -> [GleanAsset] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        // 关键：默认只返回连拍组的 key photo，其余 19 张完全不出现。
+        // 不打开这个开关，“连拍”这个最该清理的场景在数据层面就消失了。
+        options.includeAllBurstAssets = true
         let result = PHAsset.fetchAssets(with: .image, options: options)
 
         var out: [GleanAsset] = []

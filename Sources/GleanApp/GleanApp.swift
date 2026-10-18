@@ -7,7 +7,7 @@ struct GleanApp: App {
     var body: some Scene {
         WindowGroup("glean") {
             ContentView()
-                .frame(minWidth: 720, minHeight: 460)
+                .frame(minWidth: 820, minHeight: 540)
         }
         .windowResizability(.contentMinSize)
     }
@@ -16,16 +16,15 @@ struct GleanApp: App {
 struct ContentView: View {
     @State private var status: PHAuthorizationStatus = PhotoAccess.current
     @State private var assets: [GleanAsset] = []
-    @State private var log: [String] = []
     @State private var busy = false
+    @StateObject private var runner = AnalysisRunner()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             header
             Divider()
             summary
-            Spacer(minLength: 0)
-            console
+            report
         }
         .padding(20)
     }
@@ -34,7 +33,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("glean")
                 .font(.system(size: 28, weight: .semibold, design: .serif))
-            Text("拾穗：从图库里把值得留下的挑出来。")
+            Text("拾穗：把一次拍摄里值得留下的那一张挑出来。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -43,54 +42,64 @@ struct ContentView: View {
                     Button("请求相册访问权限") {
                         Task {
                             status = await PhotoAccess.request()
-                            append("授权结果: \(describe(status))")
                         }
                     }
                     .keyboardShortcut(.defaultAction)
                 } else if status == .authorized || status == .limited {
                     Button("扫描图库") { scan() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(busy)
+                        .disabled(busy || runner.running)
 
-                    Button("试算 30 张特征") { probe() }
-                        .disabled(busy || assets.isEmpty)
+                    Button("分析最近 300 张") { analyze() }
+                        .disabled(busy || runner.running || assets.isEmpty)
                 } else {
                     Text("需要在系统设置 → 隐私与安全性 → 照片 里允许访问。")
                         .font(.callout)
                         .foregroundStyle(.red)
                 }
-                if busy { ProgressView().controlSize(.small) }
+
+                if busy || runner.running {
+                    ProgressView().controlSize(.small)
+                }
+                if !runner.progress.isEmpty {
+                    Text(runner.progress)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
 
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("授权状态：\(describe(status))")
-            Text("资产数量：\(assets.count)")
-            if let burstCount = Optional(assets.filter { $0.burstID != nil }.count), burstCount > 0 {
-                Text("其中连拍：\(burstCount)")
-            }
-            let shots = assets.filter(\.isScreenshot).count
-            if shots > 0 { Text("其中截图：\(shots)") }
+        HStack(spacing: 18) {
+            metric("授权", describe(status))
+            metric("资产", "\(assets.count)")
+            metric("连拍", "\(assets.filter { $0.burstID != nil }.count)")
+            metric("截图", "\(assets.filter(\.isScreenshot).count)")
         }
-        .font(.callout)
-        .monospacedDigit()
     }
 
-    private var console: some View {
+    private func metric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.callout).monospacedDigit()
+        }
+    }
+
+    private var report: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(log.enumerated()), id: \.offset) { _, line in
+                ForEach(Array(runner.report.enumerated()), id: \.offset) { _, line in
                     Text(line)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(line.hasPrefix("──") ? .primary : .secondary)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(10)
         }
-        .frame(height: 160)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Actions
@@ -98,42 +107,19 @@ struct ContentView: View {
     private func scan() {
         busy = true
         Task {
-            let started = Date()
             let loaded = LibraryScanner.loadAssets()
             await MainActor.run {
                 assets = loaded
-                append("扫描到 \(loaded.count) 张图片，耗时 \(ms(since: started))")
                 busy = false
             }
         }
     }
 
-    /// 只为验证整条链路（PhotoKit 取图 → Vision 出向量）能跑通，并量一下真实速度。
-    /// 后续这层会被换成「全量 + 增量缓存」的批处理。
-    private func probe() {
-        busy = true
+    private func analyze() {
         Task {
-            let sample = Array(assets.prefix(30))
-            let started = Date()
-            var ok = 0
-            var dims = 0
-            for asset in sample {
-                guard let image = await Thumbnailer.image(for: asset.id) else { continue }
-                if let vector = try? FeaturePrintService.vector(for: image) {
-                    ok += 1
-                    dims = vector.count
-                }
-            }
-            let perItem = Date().timeIntervalSince(started) / Double(max(ok, 1))
-            await MainActor.run {
-                append("特征提取 \(ok)/\(sample.count) 成功，维度 \(dims)")
-                append(String(format: "单张耗时 %.1f ms → 约 %.0f 张/秒", perItem * 1000, 1 / perItem))
-                busy = false
-            }
+            await runner.run(assets: assets)
         }
     }
-
-    // MARK: - Helpers
 
     private func describe(_ status: PHAuthorizationStatus) -> String {
         switch status {
@@ -144,13 +130,5 @@ struct ContentView: View {
         case .limited: return "仅选中照片"
         @unknown default: return "未知"
         }
-    }
-
-    private func ms(since start: Date) -> String {
-        String(format: "%.0f ms", Date().timeIntervalSince(start) * 1000)
-    }
-
-    private func append(_ line: String) {
-        log.append(line)
     }
 }

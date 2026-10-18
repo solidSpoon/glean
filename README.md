@@ -33,6 +33,40 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 
 **为什么不用 Python / Electron / Tauri**：为一个自用工具背 Python + torch（2GB）或 Electron 运行时（200MB）都不值；而 macOS 上最好的图像相似度模型本来就已经在系统里了。
 
+## 管线
+
+```
+时间切片（间隔 >90s 断开一个会话）
+    ↓   候选集从全库（十万对级）降到会话内（几十对）
+会话内聚类：阈值是时间间隔的函数
+    ↓   ≤2s → 0.65 / ≤30s → 0.70 / ≤5min → 0.78 / ≤2h → 0.85
+代表图（medoid）跨会话合并：仅视觉，≥0.88
+    ↓   改天重回同一地点也能连起来，但链不会跨会话蔓延
+成员下限剪枝：离代表图太远就摘出去（连拍成员豁免）
+    ↓
+组内选优：清晰度（拉普拉斯）+ 人脸质量；只在组内相对比较，免校准
+```
+
+时间切片的真正价值不是"分类"，而是**把候选集从全库砍到几十张**——之后组内才敢用低
+阈值，全局单一阈值那套问题自然消失。
+
+## 实测数字（合成图，非真实照片）
+
+| 项 | 结果 |
+|---|---|
+| FeaturePrint 单张 | 5–13 ms（含缩略图绘制），约 80–200 张/秒 |
+| 特征维度 | 768 |
+| 同一张 · 轻微模糊 2x | 0.851 |
+| 同一张 · 中度模糊 4x | 0.731 |
+| 同一张 · 重度模糊 8x | 0.699 |
+
+**最重要的一个结论：糊掉的那一张相似度会掉到 0.70–0.73，而它恰恰是最该被清掉的。**
+所以会话内阈值宁可偏低：分了不该分的组，用户扫一眼就能看出来；漏掉的那张永远不会
+自己冒出来。
+
+（合成图测不了"不同场景能否分开"——几张合成图在语义上是同一类东西，FeaturePrint 给出
+的 0.957 和"同背景主体移位"的 0.967 几乎一样。这一项只能靠真实图库的 audit。）
+
 ## 三个必须知道的坑
 
 1. **必须是 app bundle**。裸可执行文件访问相册会因为缺少 `NSPhotoLibraryUsageDescription` 被系统直接杀掉。所以开发流程是 `swift build` → 拼 `.app` → `open`，不能 `swift run`。
@@ -45,24 +79,34 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 
 ```bash
 ./scripts/run.sh              # 编译 + 打包 + 启动
-swift test                    # 聚类/相似度的单元测试
+swift test                    # 22 个测试：会话切片 / 时间阈值 / 链式合并 / 选优 / Vision 冒烟
 GLEAN_SIGN_ID="glean-dev" ./scripts/run.sh   # 签名身份稳定的版本
 ```
+
+如果 Xcode 升级后许可证未接受，`swift build` 会报 *"You have not agreed to the Xcode
+license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Command Line Tools 的
+工具链；手动跑 `swift test` 时用
+`/Library/Developer/CommandLineTools/usr/bin/swift test`。
 
 ```
 Sources/GleanCore/       纯逻辑，不依赖 UI
   Models.swift           GleanAsset / FeaturePrint
   PhotoLibrary.swift     授权、资产枚举、缩略图
   FeaturePrintService.swift  Vision 特征提取
-  Clustering.swift       并查集 + 余弦相似度分组
-Sources/GleanApp/        SwiftUI 壳
+  Session.swift          时间切片
+  Grouping.swift         阈值策略 + 两阶段聚类 + 成员剪枝
+  ImageQuality.swift     清晰度 / 人脸质量
+  KeeperRanker.swift     组内选优
+  Clustering.swift       并查集 + 余弦
+Sources/GleanApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
 Resources/Info.plist     bundle 元数据（含相册用途说明）
 scripts/                 打包与启动
 ```
 
 ## 路线
 
-- **M1 质量**：全量扫描 → 特征 → 分组 → 导出 JSON，用真实图库调阈值，确认召回和误报
+- **M1 质量**：全量扫描 → 特征 → 分组 → 导出 JSON，用真实图库调阈值（**当前在这里**：管线已跑通，阈值待审计）
+- **M1.5 审计**：按相似度分档抽样，人工标注"该合/不该合"，画出精度曲线后再定阈值
 - **M2 可用**：SwiftUI 三栏（组列表 / 缩略图网格 / 对比），键盘 `←→` 翻组、`space` 预览、`1..9` 选保留
 - **M3 安全**：删除走 `PHAssetChangeRequest.deleteAssets`（进"最近删除"，30 天内可恢复）+ 本地 manifest 记录每批操作，支持整批撤销
 - **M4 增量**：SQLite 缓存特征，只算新图；百万级再换 IVF
