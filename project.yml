@@ -19,7 +19,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    MARKETING_VERSION: "0.1.0" # x-release-please-version
+    MARKETING_VERSION: "0.1.1" # x-release-please-version
     # CFBundleVersion 也用同一个值（见 Resources/Info.plist）。
     # 两个号各自维护就会出现“显示 0.2.0、实际 bundle 还是 1”这种偏差。
     # 自用：不签名团队、临时签名，CI/命令行都能直接构建。
