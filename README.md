@@ -18,56 +18,32 @@
 
 ---
 
-一个 macOS 自用的**相似图片挑拣工具**。目标不是"删重复"（Photos.app 自带的"重复项目"相册已经能做），而是它做不了的部分：
+一个 macOS 的**相似图片挑拣工具**。目标不是"删重复"（Photos.app 自带的"重复项目"相册已经能做），而是它做不了的部分：
 
 - 连拍整组：一梭子 20 张选 1 张
 - 同一场景重拍：构图微调、换曝光
 - 截图、翻拍、聊天记录里存回来的图
 - 模糊 / 低质 / 被压缩坏的版本
 
-## 命名
+它**不替你挑，也不删东西**：只把可能重复的照片找成一堆，标记为待删除，删不删、删哪些都由你决定。
 
-`graze` / 显示名 **graze**。包名 `GrazeCore`、`GrazeApp`，bundle id `com.spoon.graze`。
+## 安装
 
-图标字形来自 [game-icons.net](https://game-icons.net) 的 `skoll/goat`（CC BY 3.0），
-底板、配色由 `scripts/compose-goat.swift` 生成。README 顶部用的 `docs/icon.png`
-是从 `Resources/Graze.icns` 导出的 256px 版本（GitHub 不认 `.icns`）。
+- **下载**：[Releases](https://github.com/solidSpoon/graze/releases) 里的 zip，仅 arm64。
+  未签名、未公证，首次打开需要执行一次 `xattr -dr com.apple.quarantine /Applications/Graze.app`。
+- **自己编译**：克隆后 `./scripts/run.sh`，产物在 `build/Graze.app`，双击运行。
+  `build/` 不入库，克隆下来没有现成 app。
 
-代码是 MIT（见 [LICENSE](LICENSE)）；**图标不在 MIT 范围内**，字形部分依 CC BY 3.0，
-署名 game-icons.net。
-
-## 技术栈
-
-```
-Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
-```
-选型理由：
-
-| 环节 | 方案 | 为什么 |
-|---|---|---|
-| 图库访问 | **PhotoKit** | 唯一被官方支持的方式；能拿到稳定的 `localIdentifier`，删除动作走系统 API |
-| 缩略图 | `PHImageManager.requestImage` 512pt | 单张 ~10ms，`isNetworkAccessAllowed = false` 只读本地副本 |
-| 相似度 | **Vision `VNGenerateImageFeaturePrintRequest`** | 768 维，跑在 ANE 上，零依赖；对重压缩/裁剪/调色/重拍的鲁棒性远好于 pHash |
-| 分组 | 归一化向量 + 点积 + 并查集 | 连通分量天然出组，无需 K-Means 调参；个人库规模 O(n²) 够用 |
-| 缓存（待做） | SQLite + Float32 BLOB | 增量扫描靠 `localIdentifier + modificationDate` |
-
-**为什么不用 Python / Electron / Tauri**：为一个自用工具背 Python + torch（2GB）或 Electron 运行时（200MB）都不值；而 macOS 上最好的图像相似度模型本来就已经在系统里了。
+要求 **macOS 26**。
 
 ## 怎么用
-
-**先用起来**：自己编译（默认路径）：`./scripts/run.sh`，产物在 `build/Graze.app`；
-或者等 [Releases](https://github.com/solidSpoon/graze/releases) 里有构建好的 zip 后直接下载
-（注意「下载 release 的人要知道」里的 arm64 和未公证两条）。`build/` 不入库，
-所以刚克隆下来没有现成 app。
-
-打开后：
 
 1. **请求相册访问权限** → 系统弹窗里选「允许」（也可以选「仅选中」先小范围试）
 2. 点**扫描图库** → 读整库一次，底部状态栏显示「读取相册 1200/7624」
 3. 工具栏选**分析范围**（最近 1/3/6 个月、1 年、全部，括号里是该范围的片数）。换范围不用重扫
 4. 点**分析** → 底部状态栏显示阶段和进度条，左侧出现相似组卡片
 
-界面是顶部共用一条系统工具栏，下面三栏：
+界面是顶部一条系统工具栏，下面三栏：
 
 | 栏 | 内容 |
 |---|---|
@@ -76,21 +52,13 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 | 右 | 选中照片的详细信息（文件名、尺寸、时间、组内相似度…） |
 
 键盘：中栏 `←→` 换照片、`空格` 开关大图、`回车` 标记/取消待删除；
-大图里 `←→` 翻看、`空格` 退出。左栏只用鼠标点击。
+大图里 `←→` 翻看、`空格` 退出。
 
 **标记待删除 = 加进 `graze 待删除` 相册**（PhotoKit 不暴露关键词，相册就是标签）。
 不复制文件，状态存在系统里；之后在 Photos.app 里打开这个相册、全选 `⌘⌫` 就是原生删除，
-30 天内可从“最近删除”恢复。
+30 天内可从"最近删除"恢复。
 
-**这个工具不替你挑。** 曾试过第三阶段「组内评分」（拉普拉斯清晰度 + 人脸质量）来推荐
-保留哪张：全库 187 秒，而哪张该留人扫一眼比算法准得多，所以那一层拆掉了。现在只做一件事：
-**把可能重复的照片找成一堆，按组内最新时间倒序排好**。
-
-所以一次完整分析的成本就是特征 + 分组：全库 7624 张约 **41 秒**（特征 39 秒 + 分组 2 秒）。
-
-**现在还不会删任何东西**——只负责找组和标记。
-
-## 管线
+## 怎么找的
 
 ```
 时间切片（间隔 >5min 断开一个会话）
@@ -104,76 +72,63 @@ Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
 组内按拍摄时间正序排列，整组按组内最新时间倒序
 ```
 
-会话切分定在 **5 分钟**。阈值表后两档（`≤30s → 0.70`、`≤5min → 0.78`）只在会话够长时
-才会轮到；切得太短，`≤5min` 那档就是永远走不到的死配置。5 分钟能把"走两步换个角度再拍"
-接进同一个会话，否则这类只能去撞 0.88 的跨会话门槛，基本会漏。
+时间切片的用处不只是分组，更是**把候选集从全库砍到几十张**——候选集小了，组内才敢用
+低阈值（0.65~0.78），全局单一阈值那套误合/漏合的问题自然消失。会话切在 5 分钟：阈值表
+后两档只在会话够长时才会轮到，切太短 `≤5min → 0.78` 就成了永远走不到的死配置。
 
-时间切片的真正价值不是"分类"，而是**把候选集从全库砍到几十张**——之后组内才敢用低
-阈值，全局单一阈值那套问题自然消失。
+全库 7624 张：特征 39 秒 + 分组 2 秒 ≈ **41 秒**；FeaturePrint 单张 5–13 ms，768 维。
 
-## 实测数字（合成图，非真实照片）
+阈值偏向"宁可多分组"：同一张图糊掉后相似度会掉到 0.70–0.73，而糊掉那张恰恰最该被清掉。
+分了不该分的组，扫一眼就能看出来；漏掉的那张则永远不会自己冒出来。
 
-| 项 | 结果 |
-|---|---|
-| FeaturePrint 单张 | 5–13 ms（含缩略图绘制），约 80–200 张/秒 |
-| 特征维度 | 768 |
-| 同一张 · 轻微模糊 2x | 0.851 |
-| 同一张 · 中度模糊 4x | 0.731 |
-| 同一张 · 重度模糊 8x | 0.699 |
+## 技术栈
 
-**最重要的一个结论：糊掉的那一张相似度会掉到 0.70–0.73，而它恰恰是最该被清掉的。**
-所以会话内阈值宁可偏低：分了不该分的组，用户扫一眼就能看出来；漏掉的那张永远不会
-自己冒出来。
+```
+Swift 6 + SwiftUI + PhotoKit + Vision + Accelerate
+```
 
-（这组数字全部来自合成图。合成图测不了"不同场景能否分开"：语义上同类的东西，FeaturePrint
-给的 0.957 和"同背景主体移位"的 0.967 几乎一样。这一项只能靠真实图库审计，所以现在的
-阈值是按"宁可多分组"定的，还没过精度曲线。）
+| 环节 | 方案 | 为什么 |
+|---|---|---|
+| 图库访问 | **PhotoKit** | 唯一被官方支持的方式；能拿到稳定的 `localIdentifier`，删除动作走系统 API |
+| 缩略图 | `PHImageManager.requestImage` 512pt | 单张 ~10ms，`isNetworkAccessAllowed = false` 只读本地副本 |
+| 相似度 | **Vision `VNGenerateImageFeaturePrintRequest`** | 768 维，跑在 ANE 上，零依赖；对重压缩/裁剪/调色/重拍的鲁棒性远好于 pHash |
+| 分组 | 归一化向量 + 点积 + 并查集 | 连通分量天然出组，无需 K-Means 调参；个人库规模 O(n²) 够用 |
+| 缓存（待做） | SQLite + Float32 BLOB | 增量扫描靠 `localIdentifier + modificationDate` |
 
-## 三个必须知道的坑
+**为什么不用 Python / Electron / Tauri**：为一个工具背 Python + torch（2GB）或 Electron 运行时（200MB）都不值；而 macOS 上最好的图像相似度模型本来就已经在系统里了。
 
-1. **必须是 app bundle**。裸可执行文件访问相册会因为缺少 `NSPhotoLibraryUsageDescription` 被系统直接杀掉。所以开发流程是 `swift build` → 拼 `.app` → `open`，不能 `swift run`。
-2. **签名身份要稳定**。ad-hoc 签名每次编译 cdhash 都变，相册授权会反复失效弹窗。建议一次性建自签名证书：
-   钥匙串访问 → 证书助理 → 创建证书 → 名称 `graze-dev`、类型「代码签名」。
-   然后 `GRAZE_SIGN_ID="graze-dev" ./scripts/run.sh`。
-3. **macOS 的 `requestImage` 回调给的是 `NSImage`**，不是 `CGImage`（iOS 才是 UIImage）。类型写错时编译器只吐一句 "failed to produce diagnostic"，看不出真正原因。
+## 路线
+
+- **M1 质量**（已完成）：全量扫描 → 特征 → 分组，管线跑通
+- **M1.5 审计**（当前）：按相似度分档抽样，人工标注"该合/不该合"，画出精度曲线后再定阈值。现在的阈值是按经验定的
+- **M2 可用**（已完成）：SwiftUI 三栏，键盘 `←→` 翻照片、`space` 预览、`回车` 标记待删除
+- **M3 安全**（未做）：删除走 `PHAssetChangeRequest.deleteAssets`（进"最近删除"，30 天内可恢复）+ 本地 manifest 记录每批操作，支持整批撤销。这就是现在还不删东西的原因
+- **M4 增量**：SQLite 缓存特征，只算新图；百万级再换 IVF
+
+## 删除策略
+
+**不做永久删除。** 两条路径：
+
+1. 首选 `PHAssetChangeRequest.deleteAssets` —— 进 Photos 的"最近删除"，30 天内可恢复
+2. 需要立刻释放磁盘时，`PHAssetResourceManager` 导出到 `~/Pictures/graze-quarantine/<批次>/` 再删，manifest 记完整路径
+
+照片是**不可再生数据**。任何"一键清理"按钮都必须能一键撤销。
 
 ## 开发
 
 ```bash
-./scripts/run.sh              # 命令行路径：编译 + 打包 + 启动
-swift test                    # 19 个测试
-./scripts/open-xcode.sh       # Xcode 路径：生成工程并打开
+./scripts/run.sh              # 编译 + 打包 + 启动，产物 build/Graze.app
+swift test                    # 单元测试
+./scripts/open-xcode.sh       # 生成 Xcode 工程并打开
 ```
 
-### 两条构建路径，一个产物
+`project.yml` 是工程配置的唯一事实来源，`graze.xcodeproj` 由它生成且不入库——要持久化的
+Build Settings 写进 `project.yml`，改完重跑 `./scripts/open-xcode.sh`。命令行和 Xcode 都输出到
+`build/Graze.app`，不会出现同 bundle id 两份 app 让相册授权认错。
 
-| | 命令行 | Xcode |
-|---|---|---|
-| 构建 | `Package.swift` + `scripts/build-app.sh` | `project.yml` → `xcodegen` |
-| 产物 | `build/Graze.app` | `build/Graze.app`（同一个路径） |
-| 运行 | `./scripts/run.sh` | ⌘R |
-| 测试 | `swift test` | ⌘U |
-
-两条路径都可用，产物落在同一个位置，不会出现同 bundle id 两份 app 让 LaunchServices
-和相册授权搞不清该认哪一个。谁最后构建就是谁。
-
-**Xcode 工程是产物，不是事实来源。** `graze.xcodeproj` 由 `project.yml` 生成且不入库——
-pbxproj 是机器生成的 XML，冲突难解、人读不了。在 Xcode 图形界面里改 Build Settings
-只会改到 `.xcodeproj`，下次 `xcodegen generate` 会被覆盖；要持久化的设置请写进 `project.yml`。
-
-改动 `project.yml` 或增删文件后记得重跑 `./scripts/open-xcode.sh`（只是重新生成，不丢东西）。
-
-### 签名
-
-默认是临时签名（`CODE_SIGN_IDENTITY: "-"`，等价于 Xcode 里的
-"Sign to Run Locally"），不需要开发者账号就能构建。但临时签名每次编译 cdhash 都变，
-相册授权会反复失效弹窗。想固定身份：把 `project.yml` 里的 `CODE_SIGN_IDENTITY` 换成你
-自签名证书的通用名（如 `graze-dev`），命令行和 Xcode 就都稳定了。
-
-如果 Xcode 升级后许可证未接受，`swift build` 会报 *"You have not agreed to the Xcode
-license agreements"*。`scripts/build-app.sh` 会自动检测并回退到 Command Line Tools 的
-工具链；手动跑 `swift test` 时用
-`/Library/Developer/CommandLineTools/usr/bin/swift test`。
+App 必须从 `.app` 里跑（裸可执行文件没有相册权限声明），所以别用 `swift run`。签名默认是
+临时签名，每次编译 cdhash 都变、相册授权会反复失效；把 `project.yml` 里的 `CODE_SIGN_IDENTITY`
+换成自己的证书通用名即可稳定。
 
 ```
 Sources/GrazeCore/       纯逻辑，不依赖 UI
@@ -185,75 +140,20 @@ Sources/GrazeCore/       纯逻辑，不依赖 UI
   Grouping.swift         阈值策略 + 两阶段聚类 + 成员剪枝
   DeletionAlbum.swift    「待删除」相册 = 标记的唯一事实来源
   Clustering.swift       并查集 + 余弦
-  GrazeLog.swift         ~/Library/Logs/graze/graze.jsonl，一行一个 JSON
+  GrazeLog.swift         ~/Library/Logs/graze/graze.jsonl
 Sources/GrazeApp/        SwiftUI 壳 + AnalysisRunner（把管线串成报告）
-Resources/Info.plist     bundle 元数据（含相册用途说明）
-project.yml              Xcode 工程描述（xcodegen 输入）
 scripts/                 打包与启动
-.github/workflows/       ci.yml（测试+打包）、release.yml（发版流水线）
-.release-please-config.json / .release-please-manifest.json   发版配置与当前版本
 ```
 
 ## 发版
 
-走 [Release Please](https://github.com/googleapis/release-please)：提交信息决定版本号，
-不需要手动改版本或写 CHANGELOG。
+提交信息决定版本号：`feat:` 升次版本、`fix:` / `perf:` 升修订号，`docs:` / `chore:` 等不发版。
+[Release Please](https://github.com/googleapis/release-please) 据此开版本 PR，合并后打 tag、
+建 Release，并在 GitHub runner 上打包出 `graze-v<版本>-arm64.zip`。
 
-```
-push 到 master
-    ↓  .github/workflows/release.yml
-release-please 判断有没有可发版的提交
-    ↓  有 → 开一个 PR：chore(master): release 0.2.0
-你合并那个 PR
-    ↓
-打 tag v0.2.0 + 建 Release + 生成 CHANGELOG
-    ↓  同一个 workflow 的第二个 job
-macos-26 上打包 → 校验版本号与 tag 一致 → graze-v0.2.0-arm64.zip 挂到 Release
-```
+版本号只有 `project.yml` 里 `MARKETING_VERSION` 一处（行尾带 `# x-release-please-version`）。
 
-**提交信息必须遵循 Conventional Commits**，否则 release-please 不知道这次该发什么：
+## 许可
 
-| 前缀 | 效果 |
-|---|---|
-| `feat: …` | 次版本号 +1（1.0 之前按 `bump-minor-pre-major` 只升 patch） |
-| `fix: …` | 修订号 +1 |
-| `perf: …` | 修订号 +1 |
-| `refactor:` / `docs:` / `chore:` / `ci:` / `test:` | 不发版（只在 CHANGELOG 里隐藏或忽略） |
-| `feat!: …` 或正文里写 `BREAKING CHANGE:` | 主版本号 +1 |
-
-版本号只有一个来源：`project.yml` 里的 `MARKETING_VERSION`（行尾带
-`# x-release-please-version` 标记，release-please 认这个注释）。`Resources/Info.plist`
-用的是 `$(MARKETING_VERSION)`，两条构建路径都会把它填进去。
-
-`ci.yml` 在每次 push / PR 上跑 `swift test` + 打包 + `codesign --verify`，
-所以「能编但拼不出 .app」这类问题在合并前就会红。
-
-### 下载 release 的人要知道
-
-- **只有 arm64**。runner 是 Apple Silicon，Intel 机器跑不了。
-- **临时签名、未公证**。从浏览器下载的 zip 带 quarantine 属性，双击会提示
-  「已损坏，应移到废纸篓」——不是包坏了，是 Gatekeeper。解开后执行一次：
-
-  ```bash
-  xattr -dr com.apple.quarantine /Applications/Graze.app
-  ```
-
-  之后能正常打开。想彻底免掉这个提示得用开发者 ID 签名 + notarize，那是另一套流程
-  （需要付费账号），自用没必要。
-
-## 路线
-
-- **M1 质量**（已完成）：全量扫描 → 特征 → 分组，管线跑通
-- **M1.5 审计**（**当前在这里**）：按相似度分档抽样，人工标注"该合/不该合"，画出精度曲线后再定阈值。现在的阈值是按经验定的
-- **M2 可用**（已完成）：SwiftUI 三栏，键盘 `←→` 翻照片、`space` 预览、`回车` 标记待删除
-- **M3 安全**（未做）：删除走 `PHAssetChangeRequest.deleteAssets`（进"最近删除"，30 天内可恢复）+ 本地 manifest 记录每批操作，支持整批撤销。**这就是"现在还不会删任何东西"的原因**
-- **M4 增量**：SQLite 缓存特征，只算新图；百万级再换 IVF
-
-## 删除策略
-
-**不做永久删除。** 两条路径：
-
-1. 首选 `PHAssetChangeRequest.deleteAssets` —— 进 Photos 的"最近删除"，30 天内可恢复
-2. 需要立刻释放磁盘时，`PHAssetResourceManager` 导出到 `~/Pictures/graze-quarantine/<批次>/` 再删，manifest 记完整路径
-
-照片是**不可再生数据**。任何"一键清理"按钮都必须能一键撤销。
+代码 MIT，见 [LICENSE](LICENSE)。图标字形来自 [game-icons.net](https://game-icons.net) 的
+`skoll/goat`（CC BY 3.0），不在 MIT 范围内。
