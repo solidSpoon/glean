@@ -25,7 +25,6 @@ enum Theme {
         var parts: [String] = []
         if links.contains(.burst) { parts.append("连拍") }
         if links.contains(.visual) { parts.append("视觉") }
-        if links.contains(.crossSession) { parts.append("跨会话") }
         return parts.joined(separator: "+")
     }
 }

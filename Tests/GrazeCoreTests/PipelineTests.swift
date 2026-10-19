@@ -74,9 +74,16 @@ final class ThresholdPolicyTests: XCTestCase {
         }
     }
 
-    func testShortGapIsPermissive() {
-        XCTAssertEqual(ThresholdPolicy.default.minSimilarity(forGap: 1), 0.65, accuracy: 1e-6)
-        XCTAssertEqual(ThresholdPolicy.default.minSimilarity(forGap: 3600), 0.85, accuracy: 1e-6)
+    func testThresholdsByGap() {
+        XCTAssertEqual(ThresholdPolicy.default.minSimilarity(forGap: 1), 0.84, accuracy: 1e-6)
+        XCTAssertEqual(ThresholdPolicy.default.minSimilarity(forGap: 30), 0.90, accuracy: 1e-6)
+        XCTAssertEqual(ThresholdPolicy.default.minSimilarity(forGap: 3600), 0.92, accuracy: 1e-6)
+    }
+
+    /// 三档：≤5 秒 / ≤1 分钟 / ≤5 分钟。多一个数就多一处说不清的行为。
+    func testThreeSteps() {
+        XCTAssertEqual(ThresholdPolicy.default.steps.count, 3)
+        XCTAssertEqual(ThresholdPolicy.screenshot.steps.count, 2)
     }
 }
 
@@ -116,32 +123,27 @@ final class GroupingTests: XCTestCase {
     }
 
     func testSameSimilarityButDifferentGapGivesDifferentVerdict() {
-        // 夹角 44° → 相似度 ≈ 0.72
-        let similar = ["a": vector(degrees: 0), "b": vector(degrees: 44)]
+        // 夹角 24° → 相似度 ≈ 0.914，在 0.84 和 0.92 之间
+        let similar = ["a": vector(degrees: 0), "b": vector(degrees: 24)]
         let closeAssets = [asset("a", offset: 0), asset("b", offset: 1)]
-        let farAssets = [asset("a", offset: 0), asset("b", offset: 200)]
+        let farAssets = [asset("a", offset: 0), asset("b", offset: 120)]
 
         XCTAssertEqual(Grouping.groups(assets: closeAssets, prints: similar).count, 1)
         XCTAssertEqual(Grouping.groups(assets: farAssets, prints: similar).count, 0)
     }
 
-    func testCrossSessionMergeNeedsStricterSimilarity() {
-        // 相隔 1 小时（不同会话），相似度 0.95
+    /// 不同会话之间不再合并：「改天重回同一地点」不是去重该干的事，
+    /// 而它恰好是误合的最大来源。哪怕两张像到 0.99，隔了 1 小时也不进同一组。
+    func testDifferentSessionsNeverMerge() {
         let assets = [asset("a", offset: 0), asset("b", offset: 3600)]
-        let prints = ["a": vector(degrees: 0), "b": vector(degrees: 18)]
-        let groups = Grouping.groups(assets: assets, prints: prints)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertTrue(groups[0].links.contains(.crossSession))
+        let prints = ["a": vector(degrees: 0), "b": vector(degrees: 2)]
+        XCTAssertEqual(Grouping.groups(assets: assets, prints: prints).count, 0)
     }
 
-    /// 单链接链式合并：A~B~C~D 依次相邻都像，但 A 与 D 差很远。
-    /// 组代表图 + 成员下限应该把最远的那张摘出去。
-    func testMemberFloorStopsChaining() {
-        let policy = ThresholdPolicy(
-            steps: [.init(maxGap: 7200, minSimilarity: 0.70)],
-            crossSessionMinSimilarity: 0.95,
-            memberFloor: 0.80
-        )
+    /// 链式合并必须从原理上不可能：v0~v1、v1~v2、v2~v3 都过线，但 v0 与 v2、v3 差很远。
+    /// 组要求「组内任意两张都过线」，所以链条断成 {v0,v1} 和 {v2,v3}。
+    func testChainsCannotFormOneGroup() {
+        let policy = ThresholdPolicy(steps: [.init(maxGap: 300, minSimilarity: 0.80)])
         let assets = (0..<4).map { asset("v\($0)", offset: Double($0)) }
         let prints = [
             "v0": vector(degrees: 0),
@@ -150,8 +152,13 @@ final class GroupingTests: XCTestCase {
             "v3": vector(degrees: 60),
         ]
         let groups = Grouping.groups(assets: assets, prints: prints, policy: policy)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].assetIDs.sorted(), ["v0", "v1", "v2"])
+
+        XCTAssertEqual(groups.count, 2, "一条链必须断开，不能变成 1 组")
+        XCTAssertEqual(groups.map { $0.assetIDs.sorted() }.sorted { $0[0] < $1[0] },
+                       [["v0", "v1"], ["v2", "v3"]])
+        for group in groups {
+            XCTAssertGreaterThanOrEqual(group.cohesion, 0.80 - 1e-4)
+        }
     }
 
     func testCohesionIsMinPairwiseSimilarity() {
@@ -205,15 +212,4 @@ final class GroupingTests: XCTestCase {
         XCTAssertEqual(groups.filter { $0.kind == .screenshot }.first?.assetIDs.sorted(), ["s1", "s2"])
     }
 
-    /// 同一对相似度（≈0.963）相隔 1 小时：照片会被合并（跨会话阈值 0.88），
-    /// 截图不应该（跨会话阈值 0.98）。这是真实图库里出现过的读数。
-    func testSameSimilarityMergesPhotosButNotScreenshots() {
-        let prints = ["a": vector(degrees: 0), "b": vector(degrees: 15.6)]
-
-        let photos = [asset("a", offset: 0), asset("b", offset: 3600)]
-        XCTAssertEqual(Grouping.groups(assets: photos, prints: prints).count, 1)
-
-        let shots = [screenshot("a", offset: 0), screenshot("b", offset: 3600)]
-        XCTAssertEqual(Grouping.groups(assets: shots, prints: prints).count, 0)
-    }
 }

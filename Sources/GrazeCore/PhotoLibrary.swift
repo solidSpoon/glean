@@ -62,28 +62,59 @@ public enum LibraryScanner {
 }
 
 public enum Thumbnailer {
-    /// 取本地可用的最大缩略图。关键点：
-    /// - `isNetworkAccessAllowed = false` 保证不会因为「优化存储」把 iCloud 原图
-    ///   全部下载下来
-    /// - 512pt 对 Visual 特征来说足够，跟原图算出来的向量几乎一致
+    /// 取图结果。光有图/没图不够用：
+    ///
+    /// 「没图」有两种完全不同的原因——「这张只在 iCloud、本地没下载」和「取不出来」。
+    /// 前者要告诉用户「去下载/确认网络」，后者是异常。混成一件事，界面就只能干转圈。
+    public struct Outcome: Sendable {
+        public let image: CGImage?
+        /// PhotoKit 明确说「这张在 iCloud，本地没有」（`PHImageResultIsInCloudKey`）。
+        public let isInCloud: Bool
+    }
+
+    /// 取本地可用的最大缩略图。
+    ///
+    /// 默认**不联网**：批量提特征时如果允许联网，「优化 Mac 储存空间」会把整个云端
+    /// 图库悄悄拉下来，几十 GB、几十分钟，用户根本没同意这件事。
+    /// 需要为「用户主动打开了这一张」下载时，把 `allowNetwork` 传 true。
+    ///
+    /// - Parameter targetSize: 512pt 对 Visual 特征足够，跟原图算出来的向量几乎一致。
     public static func image(
         for localIdentifier: String,
-        targetSize: CGSize = CGSize(width: 512, height: 512)
+        targetSize: CGSize = CGSize(width: 512, height: 512),
+        allowNetwork: Bool = false
     ) async -> CGImage? {
+        await load(for: localIdentifier, targetSize: targetSize, allowNetwork: allowNetwork).image
+    }
+
+    /// 带结果分类的取图。`onProgress` 只在真从 iCloud 下载时会被调用，0…1。
+    public static func load(
+        for localIdentifier: String,
+        targetSize: CGSize,
+        allowNetwork: Bool = false,
+        onProgress: ((Double) -> Void)? = nil
+    ) async -> Outcome {
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
-        guard let asset = assets.firstObject else { return nil }
+        guard let asset = assets.firstObject else { return Outcome(image: nil, isInCloud: false) }
 
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.resizeMode = .fast
-        options.isNetworkAccessAllowed = false
+        options.isNetworkAccessAllowed = allowNetwork
         options.isSynchronous = false
+        if allowNetwork, let onProgress {
+            // PhotoKit 在后台队列回调进度，界面状态只能在主线程改。
+            options.progressHandler = { progress, _, _, _ in
+                DispatchQueue.main.async { onProgress(progress) }
+            }
+        }
 
         let box = ResumeBox()
         // 注意：macOS 上 requestImage 的回调给的是 NSImage（iOS 是 UIImage），
         // 拿 CGImage 得自己转。写错类型时编译器只会吐一句无用的
         // "failed to produce diagnostic"，别被它带偏。
-        let nsImage: NSImage? = await withCheckedContinuation { (continuation: CheckedContinuation<NSImage?, Never>) in
+        let result: (image: NSImage?, isInCloud: Bool) = await withCheckedContinuation {
+            (continuation: CheckedContinuation<(NSImage?, Bool), Never>) in
             PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: targetSize,
@@ -98,13 +129,17 @@ public enum Thumbnailer {
                 let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
                 guard failed || cancelled || !degraded else { return }
                 guard box.claim() else { return }
-                continuation.resume(returning: failed || cancelled ? nil : image)
+                let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) ?? false
+                continuation.resume(returning: (failed || cancelled ? nil : image, inCloud))
             }
         }
 
-        guard let nsImage else { return nil }
+        guard let nsImage = result.image else {
+            return Outcome(image: nil, isInCloud: result.isInCloud)
+        }
         var rect = CGRect(origin: .zero, size: nsImage.size)
-        return nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        let cgImage = nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        return Outcome(image: cgImage, isInCloud: result.isInCloud)
     }
 }
 

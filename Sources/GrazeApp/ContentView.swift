@@ -381,15 +381,28 @@ struct ContentView: View {
                     Task { status = await PhotoAccess.request() }
                 }
             } else if status == .authorized || status == .limited {
-                Picker("范围", selection: $range) {
+                // 不用 Picker：macOS 26 上工具栏里的 `.menu` 式 Picker 会渲染成一个
+                // 没有标题、点开也没有任何条目的空控件。Menu 是工具栏里唯一稳定的下拉。
+                Menu {
                     ForEach(AnalysisRange.allCases) { option in
-                        Text("\(option.title)（\(rangeCounts[option] ?? 0)）")
-                            .tag(option)
+                        Button {
+                            range = option
+                        } label: {
+                            let title = "\(option.title)（\(rangeCounts[option] ?? 0) 张）"
+                            if option == range {
+                                Label(title, systemImage: "checkmark")
+                            } else {
+                                Text(title)
+                            }
+                        }
                     }
+                } label: {
+                    Label("范围：\(range.title)", systemImage: "calendar")
                 }
-                .pickerStyle(.menu)
+                .labelStyle(.titleAndIcon)
+                .menuIndicator(.visible)
                 .disabled(runner.scanning || runner.running || assets.isEmpty)
-                .help("分析哪段时间的照片")
+                .help("分析哪段时间的照片（当前 \(range.title)，\(rangeCounts[range] ?? 0) 张）")
 
                 Button {
                     scan()
@@ -470,6 +483,9 @@ struct ContentView: View {
 
             assets = loaded
             rangeCounts = counts
+
+            // 缓存只留图库里还存在的照片，删掉的照片不要一直占着磁盘。
+            FeatureCache.shared.retain(ids: Set(loaded.map(\.id)))
         }
     }
 

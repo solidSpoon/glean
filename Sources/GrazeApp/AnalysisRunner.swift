@@ -95,14 +95,39 @@ final class AnalysisRunner: ObservableObject {
         phase = "计算特征"
         progressValue = 0
         let featureStarted = Date()
-        prints = await featurePrints(for: assets)
+
+        // 缓存按「id + 修改时间 + 尺寸」命中，只有新图 / 改过的图才真的过一遍 Vision。
+        let cache = FeatureCache.shared
+        let (cached, pending) = cache.partition(assets)
+        prints = cached
+        var computed: [String: [Float]] = [:]
+        var inCloudSkipped = 0
+        if !pending.isEmpty {
+            let outcome = await featurePrints(for: pending, completedBefore: cached.count, total: assets.count)
+            computed = outcome.prints
+            inCloudSkipped = outcome.inCloud
+            prints.merge(computed) { _, new in new }
+            cache.store(computed, for: pending)
+        }
+        cache.save()
+
         let featureSeconds = Date().timeIntervalSince(featureStarted)
-        note("特征：\(prints.count)/\(assets.count) 张，\(String(format: "%.1fs", featureSeconds))")
+        var featureLine = "特征：\(prints.count)/\(assets.count) 张（缓存命中 \(cached.count)，新算 \(computed.count)"
+        // 仅存于 iCloud 的照片拿不到图，也就不进分组。这是有意为之（不批量下载整个云端图库），
+        // 但必须说出来，否则就是“为什么这张没被找出来”的无声黑洞。
+        if inCloudSkipped > 0 {
+            featureLine += "，仅存于 iCloud 跳过 \(inCloudSkipped)"
+        }
+        featureLine += "），\(String(format: "%.1fs", featureSeconds))"
+        note(featureLine)
         log.info("features", [
             "ok": prints.count,
             "total": assets.count,
+            "cached": cached.count,
+            "computed": computed.count,
+            "inCloudSkipped": inCloudSkipped,
             "seconds": featureSeconds,
-            "perImageMs": featureSeconds / Double(max(prints.count, 1)) * 1000,
+            "perImageMs": featureSeconds / Double(max(computed.count, 1)) * 1000,
         ])
 
         let analyzed = assets.filter { prints[$0.id] != nil }
@@ -140,6 +165,15 @@ final class AnalysisRunner: ObservableObject {
             "photoGroups": raw.filter { $0.kind == .photo }.count,
             "screenshotGroups": raw.filter { $0.kind == .screenshot }.count,
         ])
+
+        // 审计默认就写，不用开关：「为什么这两张被分成一组」是事后唯一能查的证据，
+        // 等出问题再补就打不出当时的结果了。编码 + 落盘放后台，不堵界面。
+        let auditReport = AnalysisAudit.make(assets: analyzed, prints: prints, groups: raw)
+        Task.detached(priority: .utility) {
+            if let url = AnalysisAudit.write(auditReport) {
+                GrazeLog.shared.info("audit", ["path": url.path, "groups": auditReport.groupCount])
+            }
+        }
 
         guard !raw.isEmpty else {
             note("没有发现相似组。样本小时这很正常。")
@@ -224,8 +258,19 @@ final class AnalysisRunner: ObservableObject {
 
     // MARK: - 特征提取
 
-    private func featurePrints(for assets: [GrazeAsset]) async -> [String: [Float]] {
-        var result: [String: [Float]] = [:]
+    /// 一批特征的结果。除了向量，还带回「多少张因为只在 iCloud 而拿不到图」——
+    /// 这个数字必须报出来，否则就是“为什么这张没被找出来”的无声黑洞。
+    private struct FeatureBatch {
+        var prints: [String: [Float]] = [:]
+        var inCloud = 0
+    }
+
+    private func featurePrints(
+        for assets: [GrazeAsset],
+        completedBefore: Int,
+        total: Int
+    ) async -> FeatureBatch {
+        var batch = FeatureBatch()
         let chunkSize = 8
         var index = 0
 
@@ -233,37 +278,51 @@ final class AnalysisRunner: ObservableObject {
             let upper = min(index + chunkSize, assets.count)
             let chunk = Array(assets[index..<upper])
 
-            let partial = await withTaskGroup(of: (String, [Float])?.self) { group in
+            // 这里刻意不允许联网：批量提特征时把整个云端图库拉下来不是用户点「分析」时的预期。
+            let partial = await withTaskGroup(of: (id: String, vector: [Float]?, inCloud: Bool).self) { group in
                 for asset in chunk {
                     group.addTask {
-                        guard let image = await Thumbnailer.image(for: asset.id) else {
-                            GrazeLog.shared.debug("thumbnail.missing", ["id": asset.id])
-                            return nil
+                        let outcome = await Thumbnailer.load(
+                            for: asset.id,
+                            targetSize: CGSize(width: 512, height: 512),
+                            allowNetwork: false
+                        )
+                        guard let image = outcome.image else {
+                            GrazeLog.shared.debug("thumbnail.missing", [
+                                "id": asset.id,
+                                "inCloud": outcome.isInCloud,
+                            ])
+                            return (asset.id, nil, outcome.isInCloud)
                         }
                         do {
-                            return (asset.id, try FeaturePrintService.vector(for: image))
+                            return (asset.id, try FeaturePrintService.vector(for: image), false)
                         } catch {
                             GrazeLog.shared.debug("feature.failed", [
                                 "id": asset.id,
                                 "error": String(describing: error),
                             ])
-                            return nil
+                            return (asset.id, nil, false)
                         }
                     }
                 }
-                var collected: [(String, [Float])] = []
-                for await item in group {
-                    if let item { collected.append(item) }
-                }
+                var collected: [(id: String, vector: [Float]?, inCloud: Bool)] = []
+                for await item in group { collected.append(item) }
                 return collected
             }
 
-            for (id, vector) in partial { result[id] = vector }
+            for item in partial {
+                if let vector = item.vector {
+                    batch.prints[item.id] = vector
+                } else if item.inCloud {
+                    batch.inCloud += 1
+                }
+            }
             index = upper
-            progressLabel = "\(result.count)/\(assets.count)"
-            progressValue = 0.95 * Double(result.count) / Double(max(assets.count, 1))
+            let done = completedBefore + batch.prints.count
+            progressLabel = "\(done)/\(total)"
+            progressValue = 0.95 * Double(done) / Double(max(total, 1))
         }
-        return result
+        return batch
     }
 
     // MARK: - 输出

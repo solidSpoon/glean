@@ -114,4 +114,43 @@ final class VisionSmokeTests: XCTestCase {
         print(String(format: "[calibration] FeaturePrint 单张 %.1f ms，约 %.0f 张/秒", perImage, 1000 / perImage))
         XCTAssertLessThan(perImage, 500, "单张耗时异常")
     }
+
+    /// 真实 Vision 向量走一遍落盘缓存，确认 Float16 的精度损失不足以改变分组结论。
+    func testCacheRoundTripKeepsSimilarity() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("graze-cache-roundtrip-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let asset = GrazeAsset(
+            id: "asset-1",
+            pixelWidth: size,
+            pixelHeight: size,
+            creationDate: Date(timeIntervalSince1970: 1_700_000_000),
+            burstID: nil,
+            isScreenshot: false,
+            isHidden: false,
+            originalFilename: "asset-1.heic",
+            modificationDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let sharp = scene(circles: layoutA)
+        let medium = scene(circles: layoutB)
+        let original = try FeaturePrintService.vector(for: sharp)
+        let other = try FeaturePrintService.vector(for: medium)
+
+        let cache = FeatureCache(directory: directory)
+        cache.store([asset.id: original], for: [asset])
+        cache.save()
+        cache.reload()
+
+        let (cached, pending) = cache.partition([asset])
+        XCTAssertTrue(pending.isEmpty)
+        let restored = try XCTUnwrap(cached[asset.id])
+        XCTAssertEqual(restored.count, original.count)
+
+        let before = Similarity.cosine(Similarity.normalized(original), Similarity.normalized(other))
+        let after = Similarity.cosine(Similarity.normalized(restored), Similarity.normalized(other))
+        print(String(format: "[cache] 余弦 落盘前 %.4f → 读回 %.4f", before, after))
+        XCTAssertEqual(before, after, accuracy: 0.001, "Float16 缓存不准到能改变结论")
+    }
 }

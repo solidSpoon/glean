@@ -238,7 +238,20 @@ struct PreviewOverlay: View {
     var onToggleMark: ((String) -> Void)?
 
     @State private var image: CGImage?
+    @State private var phase: Phase = .loading
+    /// 每次取图用一个新 token。左→右换图时上一次下载的进度回调还会继续来，
+    /// 不带 token 就会把进度条铺到新照片上。
+    @State private var token = UUID()
     @FocusState private var focused: Bool
+
+    /// 大图有三种状态，不能只留一个 `image == nil`：
+    /// 「正在从 iCloud 下载」要能看到进度，「下载失败」要能重试。
+    /// 只写 `ProgressView()` 的话，取不到图的照片会永远转圈，看起来像死机。
+    private enum Phase: Equatable {
+        case loading
+        case downloading(Double)
+        case failed(String)
+    }
 
     private var asset: AnalyzedAsset? { state?.asset }
     private var isCurrentMarked: Bool {
@@ -261,8 +274,7 @@ struct PreviewOverlay: View {
                             .aspectRatio(contentMode: .fit)
                             .padding(.horizontal, 24)
                     } else {
-                        ProgressView()
-                            .controlSize(.large)
+                        placeholder(for: asset)
                     }
 
                     Spacer(minLength: 0)
@@ -278,8 +290,7 @@ struct PreviewOverlay: View {
         .onAppear { focused = true }
         .task(id: asset?.id) {
             guard let asset else { return }
-            image = nil
-            image = await ThumbnailCache.shared.image(for: asset.id, target: 1600)
+            await loadImage(asset)
         }
         .onKeyPress(.leftArrow) { step(-1) }
         .onKeyPress(.rightArrow) { step(1) }
@@ -296,6 +307,65 @@ struct PreviewOverlay: View {
         .onKeyPress(.escape) {
             state = nil
             return .handled
+        }
+    }
+
+    @ViewBuilder
+    private func placeholder(for asset: AnalyzedAsset) -> some View {
+        VStack(spacing: 14) {
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.large)
+
+            case .downloading(let value):
+                ProgressView(value: value) {
+                    Text("正在从 iCloud 下载… \(Int(value * 100))%")
+                        .monospacedDigit()
+                }
+                .frame(width: 260)
+
+            case .failed(let reason):
+                Image(systemName: "icloud.slash")
+                    .font(.system(size: 32))
+                Text(reason)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 340)
+                Button("重试") {
+                    Task { await loadImage(asset) }
+                }
+            }
+        }
+        .foregroundStyle(.white.opacity(0.86))
+    }
+
+    /// 大图是唯一“用户明确要看这一张”的地方，所以这里允许联网：
+    /// 「优化 Mac 储存空间」时原图只在 iCloud，不允许联网就永远只有本地那档小图。
+    private func loadImage(_ asset: AnalyzedAsset) async {
+        let request = UUID()
+        token = request
+        image = nil
+        phase = .loading
+
+        let outcome = await Thumbnailer.load(
+            for: asset.id,
+            targetSize: CGSize(width: 1600, height: 1600),
+            allowNetwork: true,
+            onProgress: { value in
+                // 回调已经被 Thumbnailer 转到主线程了
+                guard token == request, value < 1 else { return }
+                phase = .downloading(value)
+            }
+        )
+
+        guard token == request else { return }
+
+        if let loaded = outcome.image {
+            image = loaded
+        } else if outcome.isInCloud {
+            phase = .failed("这张只在 iCloud，本地没有下载，刚才拉取也没成功。\n检查网络后点「重试」；也可以先在「照片」App 里打开它，下载一次就好。")
+        } else {
+            phase = .failed("这张照片取不到图（可能已损坏，或正在 Photos 里编辑）。")
         }
     }
 
